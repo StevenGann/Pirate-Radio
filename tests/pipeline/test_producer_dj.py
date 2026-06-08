@@ -277,6 +277,25 @@ async def test_dj_and_tts_all_fail_then_backstop() -> None:
     assert segs[0].audio is _BACKSTOP  # R11: backstop substituted, no crash, no dead air
 
 
+# ---- render-poison: a non-ProviderError render crash is backstopped IN-BAND (never crashes) -----
+async def test_non_providererror_render_poison_is_backstopped(caplog) -> None:
+    class _PoisonDecoder:
+        async def decode(self, track):  # noqa: ANN001, ANN202
+            raise MemoryError("decoder C-level crash surfaced")
+
+    buf = LookAheadBuffer(maxsize=10)
+    with caplog.at_level(logging.CRITICAL):
+        await Producer(
+            items=[_track_item(10.0)], tts=StubTTS(), decoder=_PoisonDecoder(), buffer=buf,
+            backstop=_BACKSTOP,
+        ).run()
+    segs = _drain(buf)
+    assert len(segs) == 1 and segs[0].audio is _BACKSTOP  # backstopped, did NOT crash/propagate
+    assert any(
+        r.levelname == "CRITICAL" and "render-poison" in r.message for r in caplog.records
+    )  # loud operator signal
+
+
 # ---- C3 redux + capstone integration through run_once -------------------------------------
 # Under the instant VirtualSleeper, the real to_thread(normalize_to) worker hop would let the
 # player race ahead and spuriously backstop (the P2-6 virtual-time/real-time issue). These
