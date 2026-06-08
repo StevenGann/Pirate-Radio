@@ -13,7 +13,7 @@ from collections.abc import Sequence
 
 from pirate_radio.audio.buffer import DEFAULT_SAMPLE_RATE, AudioBuffer
 from pirate_radio.audio.decode import Decoder
-from pirate_radio.dj.protocols import AudioSink, TTSEngine
+from pirate_radio.dj.protocols import AudioSink, TextGenerator, TTSEngine
 from pirate_radio.pipeline.buffer import LookAheadBuffer
 from pirate_radio.pipeline.player import Player
 from pirate_radio.pipeline.producer import Producer
@@ -53,6 +53,10 @@ async def run_once(
     backstop: AudioBuffer,
     sleeper: Sleeper,
     refill_budget_seconds: float,
+    text_generator: TextGenerator | None = None,  # P3-8: ranked DJ chain (None -> NullDJ floor)
+    persona: str | None = None,  # P3-8: grounding; None -> the Producer's default sentinel
+    station_name: str | None = None,
+    station_tagline: str | None = None,
     loudness_target_lufs: float = -16.0,  # C3: threaded to the producer
     sample_rate: int = DEFAULT_SAMPLE_RATE,  # C4: declared station format
     channels: int = 1,
@@ -74,6 +78,10 @@ async def run_once(
         decoder=decoder,
         buffer=buffer,
         backstop=backstop,
+        text_generator=text_generator,  # P3-8 (None -> NullDJ floor)
+        persona=persona,
+        station_name=station_name,
+        station_tagline=station_tagline,
         loudness_target_lufs=loudness_target_lufs,  # C3
     )
     player = Player(
