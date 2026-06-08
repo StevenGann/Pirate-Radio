@@ -8,11 +8,15 @@ real files — no mocks (plan §6.0 / §6.8).
 from __future__ import annotations
 
 import wave
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 from mutagen.id3 import TALB, TDRC, TIT2, TPE1
 from mutagen.wave import WAVE
+
+from pirate_radio.clock import FixedClock
 
 
 def write_silent_wav(path: Path, *, seconds: int = 1) -> None:
@@ -73,3 +77,23 @@ def make_wav() -> object:
         return path
 
     return _make
+
+
+@pytest.fixture
+def fixed_clock() -> FixedClock:
+    """A deterministic clock: Wednesday 2026-06-10 09:30 (weekday()==2), tz-aware."""
+    return FixedClock(datetime(2026, 6, 10, 9, 30, tzinfo=ZoneInfo("America/New_York")))
+
+
+@pytest.fixture
+def grid_yaml(tmp_path: Path) -> Path:
+    """A station schedule_dir holding a valid default.yaml over classical+oldies."""
+    schedule_dir = tmp_path / "stations" / "pirate-one"
+    schedule_dir.mkdir(parents=True)
+    (schedule_dir / "default.yaml").write_text(
+        "slots:\n"
+        '  - {start: "00:00", end: "06:00", group: classical, name: "Night Music"}\n'
+        '  - {start: "06:00", end: "00:00", group: oldies, name: "Day"}\n',
+        encoding="utf-8",
+    )
+    return schedule_dir

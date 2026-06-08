@@ -1,16 +1,9 @@
-"""Pirate Radio — Raspberry Pi based radio project.
+"""Pirate Radio — a Raspberry Pi based automated, multi-station FM broadcaster.
 
-This is a placeholder package created during infrastructure setup.
-Real modules will be added once the design document is finalized.
+Phase 0 (skeleton) provides the validated configuration + content/schedule model:
+``config``, ``catalog``, ``schedule`` (grid), ``persistence``, ``clock``,
+``audio_devices``, and ``errors``. See ``PiRate_Radio_Design_Doc.md`` and
+``docs/BUILD-LOG.md`` for status.
 """
 
 __version__ = "0.0.1"
-
-
-def hello() -> str:
-    """Return a trivial greeting.
-
-    Exists only to give the test suite something real to exercise so CI is
-    green from the first commit. Remove once real modules exist.
-    """
-    return "pirate-radio online"
