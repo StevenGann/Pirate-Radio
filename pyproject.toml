@@ -25,6 +25,7 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.10",
     "types-PyYAML",
+    "pytest-asyncio>=0.23",
 ]
 
 [tool.setuptools.packages.find]
@@ -39,6 +40,7 @@ pirate_radio = ["py.typed"]
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
+asyncio_mode = "auto"  # bare `async def test_*` (no per-test decorator)
 addopts = [
     "-ra",
     "--import-mode=importlib",  # allow same-basename test files across dirs (no __init__)
