@@ -256,6 +256,21 @@ def test_resolve_persona_from_file(tmp_path: Path) -> None:
     assert resolve_persona(station) == "from the file"
 
 
+def test_resolve_persona_unreadable_file_raises_configerror(tmp_path: Path) -> None:
+    # Old Man: a missing/unreadable persona file must be a typed ConfigError naming the path,
+    # not a raw OSError traceback at boot (consistent with the project's IO-boundary idiom).
+    station = StationConfig(
+        name="S",
+        schedule_dir=tmp_path,
+        content_dir=Path("/c"),
+        dj_personality_file=Path("nope.md"),  # tmp_path/nope.md does not exist
+        tts=(PiperTTSConfig(backend="piper", voice="v"),),
+        audio_device="d",
+    )
+    with pytest.raises(ConfigError, match="persona"):
+        resolve_persona(station)
+
+
 # ---- H22: the secret VALUE never reaches a log record (the module's reason to exist) -------
 async def test_no_secret_value_in_logs_after_failed_patter(
     caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch

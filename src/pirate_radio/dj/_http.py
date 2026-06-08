@@ -44,7 +44,7 @@ async def post_json(
     body: dict[str, object],
     *,
     timeout: float,
-) -> dict:
+) -> dict[str, object]:
     """The ONE httpx POST->JSON path for DeepSeek + Ollama. Lazy import (R21); the network lines
     are the only ``pragma: no cover``; >=4xx -> map_http_status; transport errors ->
     map_httpx_exception (an already-typed ProviderError surfaces unchanged)."""

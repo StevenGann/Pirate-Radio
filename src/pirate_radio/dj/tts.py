@@ -34,6 +34,8 @@ from pirate_radio.errors import ProviderError, ProviderFatal, ProviderUnavailabl
 
 logger = logging.getLogger(__name__)
 
+_ESPEAK_BASE_WPM = 175  # espeak's ~default speaking rate; scaled by cfg.speed
+
 
 def wav_bytes_to_buffer(raw: bytes) -> AudioBuffer:
     """PURE: canonical s16 PCM-WAV bytes -> ``AudioBuffer`` at the WAV's own rate (the caller
@@ -84,7 +86,7 @@ def build_espeak_argv(binary: str, cfg: EspeakTTSConfig, out_path: str) -> list[
         "-v",
         cfg.voice,
         "-s",
-        str(round(175 * cfg.speed)),  # ~175 wpm default; speed MATH here
+        str(round(_ESPEAK_BASE_WPM * cfg.speed)),  # speed MATH here
         "-p",
         str(cfg.pitch),  # 0..99
         "-w",

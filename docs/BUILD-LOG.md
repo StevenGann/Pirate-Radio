@@ -171,8 +171,19 @@ virtual-time/Sleeper-seam contract (P2) nailed. All committed; resume is lossles
 - **Phase-4 carry-forwards (opened during Phase 3):** summed-timeout refill budget (DA); repeated
   fall-through WARNING de-dup (Old Man); the run_once DJ-arg signature should migrate to a Phase-4
   coordinator that owns DjContext assembly (§7-Q4); decoder/TTS *actual*-rate verification (0022).
-- **RESUME POINT: Phase-3 full-team deep-dive (code quality + documentation) — overnight mandate
-  finale.** Then Phase 4 (coordinator/supervisor/systemd/real sink/midnight regen) needs a plan.
+- **Phase-3 deep-dive ✅ COMPLETE — all 7 agents (`0032`).** No CRITICAL. Fixed 2 HIGH: DA found a
+  **zero-frame-segment dead-air hole** (player backstop only fires on a buffer miss → producer now
+  backstops a `frames==0` render); Old Man found a `-O`-strippable `assert` in `resolve_persona`
+  (→ explicit raise + file-read error wrap). Fixed MEDIUM/LOW: shipped `config.example.json`
+  (operator deployability), `max_requests_per_minute` marked reserved/not-enforced, `block_reminder`
+  prompt reworded grounded-only, README Ollama-timeout/worst-case-stall/DeepSeek/logging doc fixes,
+  `post_json` return type, `_ESPEAK_BASE_WPM` constant. Fact Checker: docs factually sound.
+  Gate: **568 tests, 98.56%, ruff/mypy --strict clean (38 files)**.
+- **Deferred to Phase 4 (noted, not defects):** `item_kind` redundant Protocol param; raw-exception
+  secret-scrub (defense-in-depth); track-tag length cap; worst-case refill budget under outage;
+  logging entrypoint; minor coverage-accounting nits.
+- **RESUME POINT: Phase 4** (coordinator/supervisor/systemd/real sink/midnight regen) — needs a plan
+  (planner + full-seven panel) the way Phases 0–3 were.
 ### Phase 4 — Multi-station (supervisor, systemd)  — NOT STARTED
 ### Phase 5 — Offline tagging tool  — NOT STARTED
 ### Phase 6 — Control API (FastAPI, in v1 per D4)  — NOT STARTED

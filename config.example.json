@@ -1,0 +1,38 @@
+{
+  "state_dir": "/mnt/ssd/pirate-radio/state",
+  "ffmpeg_binary": "/usr/bin/ffmpeg",
+  "decode_timeout_seconds": 120,
+  "tts_timeout_seconds": 30,
+  "llm": {
+    "request_timeout_seconds": 20,
+    "max_requests_per_minute": 20,
+    "providers": [
+      { "backend": "claude", "model": "REPLACE-with-current-claude-model", "api_key_env": "ANTHROPIC_API_KEY" },
+      { "backend": "deepseek", "model": "deepseek-chat", "api_key_env": "DEEPSEEK_API_KEY" },
+      { "backend": "ollama", "model": "llama3", "endpoint": "http://nas.local:11434" }
+    ]
+  },
+  "tts_providers": {
+    "elevenlabs": { "api_key_env": "ELEVENLABS_API_KEY" },
+    "piper": { "binary": "/opt/piper/piper", "voices_dir": "/mnt/ssd/voices" },
+    "espeak": {}
+  },
+  "stations": [
+    {
+      "name": "PiRate One",
+      "tagline": "all killer, no filler",
+      "description": "the flagship channel",
+      "schedule_dir": "/mnt/ssd/pirate-radio/schedules/pirate-one",
+      "content_dir": "/mnt/ssd/pirate-radio/content/pirate-one",
+      "audio_device": "usb-port-1",
+      "dj_personality": "A warm, concise late-night host who never rambles.",
+      "loudness_target_lufs": -16.0,
+      "transition_silence_seconds": 2.0,
+      "repeat_window_minutes": 120,
+      "tts": [
+        { "backend": "elevenlabs", "voice_id": "REPLACE-with-elevenlabs-voice-id" },
+        { "backend": "piper", "voice": "en_US-ryan-high", "speed": 1.0 }
+      ]
+    }
+  ]
+}

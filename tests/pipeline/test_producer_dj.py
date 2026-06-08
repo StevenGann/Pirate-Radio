@@ -234,6 +234,25 @@ async def test_default_text_generator_is_nulldj_floor() -> None:
     assert tts.spoken == [announcement_text(_id_item())]
 
 
+# ---- DA deep-dive HIGH: a present-but-zero-frame render is dead air -> backstop ------------
+async def test_zero_frame_render_substitutes_backstop(caplog) -> None:
+    # A backend that returns a structurally-valid but ZERO-FRAME buffer (e.g. a degenerate WAV)
+    # must NOT air 0s of silence — the player backstop only fires on a buffer MISS, so the
+    # PRODUCER must catch the empty render and substitute the canned backstop (R11/§9.3).
+    class _ZeroFrameTTS:
+        async def synthesize(self, text: str) -> AudioBuffer:
+            return AudioBuffer.silence(seconds=0.0)
+
+    buf = LookAheadBuffer(maxsize=10)
+    chain = RankedTextGenerator([ScriptedDJ(text="hi")])
+    with caplog.at_level(logging.WARNING):
+        await _producer([_id_item()], tts=_ZeroFrameTTS(), text_generator=chain, buf=buf).run()
+    segs = _drain(buf)
+    assert len(segs) == 1
+    assert segs[0].audio is _BACKSTOP  # zero-frame render -> backstop, never aired as silence
+    assert any("0 frames" in r.message or "frame" in r.message.lower() for r in caplog.records)
+
+
 # ---- whole-chain exhaustion -> R11 backstop (no crash, no dead air) ------------------------
 async def test_dj_and_tts_all_fail_then_backstop() -> None:
     buf = LookAheadBuffer(maxsize=10)

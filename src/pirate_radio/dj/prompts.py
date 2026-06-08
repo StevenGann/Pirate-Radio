@@ -80,7 +80,9 @@ _TASK_BY_KIND: dict[str, str] = {
     "outro": "Briefly recap the song that just played.",
     "factoid": "Share ONE short, true aside drawn only from the facts above.",
     "block_transition": "Close the current block and welcome listeners into the next one.",
-    "block_reminder": "Remind listeners what block they're in and what's coming up.",
+    # grounded-only: a block_reminder carries NO next-block facts, so it must NOT ask for
+    # "what's coming up" — that would invite a hallucination the anti-hallucination rule forbids.
+    "block_reminder": "Remind listeners what block they're currently tuned to.",
     "station_id": "Give a short station identification.",
 }
 

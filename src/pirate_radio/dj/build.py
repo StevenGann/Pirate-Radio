@@ -47,8 +47,15 @@ def resolve_persona(station: StationConfig) -> str:
     ``DjContext`` (persona is per-context, not per-provider)."""
     if station.dj_personality is not None:
         return station.dj_personality
-    assert station.dj_personality_file is not None  # _exactly_one_persona guarantees this
-    return (station.schedule_dir / station.dj_personality_file).read_text(encoding="utf-8")
+    if station.dj_personality_file is None:  # _exactly_one_persona should guarantee this
+        raise ConfigError(f"station {station.name!r}: no DJ persona configured (inline or file)")
+    path = station.schedule_dir / station.dj_personality_file
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:  # typed boundary error, names the path
+        raise ConfigError(
+            f"station {station.name!r}: cannot read persona file {path}: {exc}"
+        ) from exc
 
 
 def build_text_generator(llm: LLMConfig) -> RankedTextGenerator:

@@ -96,13 +96,24 @@ but to actually hear LLM patter you need at least one working text backend and o
 - **Ollama runs on a LAN host, NOT on the Pi** (D2). Point `llm.providers[].endpoint` at it (e.g.
   `http://nas.local:11434`); the daemon validates the URL shape at boot. On-Pi LLM inference is out
   of scope (RAM/throughput).
-- **Set a provider-side spend cap** on any metered cloud account (Anthropic / ElevenLabs). Patter
-  output is bounded by `_MAX_TOKENS = 256` per call and failover does **no in-place retry** (≤ chain
-  length calls per item), but a hard account-level cap is the real backstop against a runaway bill.
-- **Per-call network timeouts** default to 20 s (LLM) / 30 s (Ollama + ElevenLabs) and are tunable
-  via `llm.request_timeout_seconds` and `tts_timeout_seconds`; a hung call → fail-through → floor.
+- **Set a provider-side spend cap** on every metered cloud account (Anthropic, **DeepSeek**,
+  ElevenLabs are all paid). Patter output is bounded by `_MAX_TOKENS = 256` per call and failover
+  does **no in-place retry** (≤ chain-length calls per item), but a hard account-level cap is the
+  real backstop against a runaway bill. `max_requests_per_minute` in `config.json` is **reserved,
+  not yet enforced** (a Phase-4 coordinator concern) — do not rely on it to throttle.
+- **Per-call network timeouts** default to **20 s for every LLM backend** (`llm.request_timeout_seconds`,
+  applied uniformly incl. Ollama) and **30 s for TTS** (`tts_timeout_seconds`); a hung call →
+  fail-through → floor. **On a flaky link, order the chains local-first** (Piper before ElevenLabs;
+  Ollama-on-LAN ahead of cloud) — failover tries providers *in series* with no global deadline, so
+  a total-outage worst case for one patter item is the **sum** of its chain timeouts (~Σ ≈ 60 s LLM
+  + 30 s TTS); local-first keeps that latency off the critical path.
+- **Logging:** the daemon's logging handler/level is set up by the Phase-4 entrypoint (not yet
+  shipped). Until then, the failover/degrade WARNINGs reach `stderr` via Python's last-resort
+  handler; run under a harness that calls `logging.basicConfig(level=INFO)` to see the full trail.
 
-Annotated `config.json` excerpt for a Phase-3 station (ranked LLM + ranked TTS):
+A **complete, copy-able** config lives at [`config.example.json`](config.example.json) (pure JSON —
+`cp config.example.json config.json` and edit the `REPLACE-…` values + paths). Annotated excerpt of
+the Phase-3-specific parts (ranked LLM + ranked TTS):
 
 ```jsonc
 {

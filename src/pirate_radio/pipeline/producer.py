@@ -20,7 +20,7 @@ from pirate_radio.dj.context import BlockContext, DjContext, TrackMeta
 from pirate_radio.dj.failover import RankedTextGenerator
 from pirate_radio.dj.fakes import NullDJ
 from pirate_radio.dj.protocols import TextGenerator, TTSEngine
-from pirate_radio.errors import ProviderError
+from pirate_radio.errors import ProviderError, ProviderUnavailable
 from pirate_radio.pipeline.buffer import LookAheadBuffer
 from pirate_radio.pipeline.segment import RenderedSegment
 from pirate_radio.schedule.models import (
@@ -128,6 +128,11 @@ class Producer:
         for item in self._items:
             try:
                 audio = await self._render(item)
+                if audio.frames == 0:
+                    # A structurally-valid but EMPTY render (e.g. a degenerate decoder/TTS output)
+                    # is dead air — the player backstop only fires on a buffer MISS, never on a
+                    # zero-frame segment, so substitute the backstop here (R11/§9.3, DA deep-dive).
+                    raise ProviderUnavailable(f"{item.kind} rendered 0 frames")
                 label = _item_label(item)
                 audio = await asyncio.to_thread(  # Q9/R23: R128 is CPU work, off the loop
                     normalize_to, audio, target_lufs=self._target_lufs, track_label=label
