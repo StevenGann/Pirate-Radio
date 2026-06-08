@@ -62,12 +62,19 @@ def build_ffmpeg_argv(binary: str, src: str, *, sample_rate: int, channels: int)
     ``sample_rate`` and down/upmixed to ``channels`` (ffmpeg-side, Q2)."""
     return [
         binary,
-        "-nostdin", "-hide_banner", "-loglevel", "error",
-        "-i", src,
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        src,
         "-vn",  # drop any cover-art video stream
-        "-ar", str(sample_rate),  # H5: resample ffmpeg-side (Q2)
-        "-ac", str(channels),  # channel policy (Q6: mono v1)
-        "-f", "f32le",  # raw 32-bit float LE -> maps 1:1 to float32 (Q1)
+        "-ar",
+        str(sample_rate),  # H5: resample ffmpeg-side (Q2)
+        "-ac",
+        str(channels),  # channel policy (Q6: mono v1)
+        "-f",
+        "f32le",  # raw 32-bit float LE -> maps 1:1 to float32 (Q1)
         "-",  # stdout
     ]
 

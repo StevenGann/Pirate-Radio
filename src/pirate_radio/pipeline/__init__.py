@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Sequence
 
-from pirate_radio.audio.buffer import AudioBuffer
+from pirate_radio.audio.buffer import DEFAULT_SAMPLE_RATE, AudioBuffer
 from pirate_radio.audio.decode import Decoder
 from pirate_radio.dj.protocols import AudioSink, TTSEngine
 from pirate_radio.pipeline.buffer import LookAheadBuffer
@@ -33,6 +33,17 @@ __all__ = [
 ]
 
 
+def _assert_station_format(*, backstop: AudioBuffer, sample_rate: int, channels: int) -> None:
+    """C4/H5: the backstop, every segment, and the transition silence must share ONE station
+    (sample_rate, channels). The decoder/TTS are wired to (sample_rate, channels) by the caller;
+    here we verify the backstop matches the declared format so the sink never sees two formats."""
+    if backstop.sample_rate != sample_rate or backstop.channels != channels:
+        raise ValueError(
+            f"station format desync: backstop is ({backstop.sample_rate}, {backstop.channels}) "
+            f"but segments are ({sample_rate}, {channels}) -- H5: one station-level format"
+        )
+
+
 async def run_once(
     *,
     items: Sequence[ScheduleItem],
@@ -42,16 +53,29 @@ async def run_once(
     backstop: AudioBuffer,
     sleeper: Sleeper,
     refill_budget_seconds: float,
+    loudness_target_lufs: float = -16.0,  # C3: threaded to the producer
+    sample_rate: int = DEFAULT_SAMPLE_RATE,  # C4: declared station format
+    channels: int = 1,
     transition_silence: float = 0.0,
     maxsize: int = 2,
 ) -> None:
     """Render and play ``items`` once, producer and player running concurrently.
 
-    Returns when every item has aired. Nothing is dropped (P1); a slow/failed render is
-    covered by the producer substitution and the player backstop, never dead air (R11).
+    Returns when every item has aired. Every segment is loudness-normalized to
+    ``loudness_target_lufs`` (§10); nothing is dropped (P1); a slow/failed render is covered by
+    the producer substitution and the player backstop, never dead air (R11). Raises at
+    construction on a backstop/station-format desync (C4) — before anything airs.
     """
+    _assert_station_format(backstop=backstop, sample_rate=sample_rate, channels=channels)  # C4
     buffer = LookAheadBuffer(maxsize=maxsize)
-    producer = Producer(items=items, tts=tts, decoder=decoder, buffer=buffer, backstop=backstop)
+    producer = Producer(
+        items=items,
+        tts=tts,
+        decoder=decoder,
+        buffer=buffer,
+        backstop=backstop,
+        loudness_target_lufs=loudness_target_lufs,  # C3
+    )
     player = Player(
         buffer=buffer,
         sink=sink,

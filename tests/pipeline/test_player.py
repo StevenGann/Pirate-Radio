@@ -101,6 +101,40 @@ async def test_backstop_gap_fills_then_late_item_still_plays(caplog) -> None:
     assert any(r.levelno == logging.WARNING for r in caplog.records)
 
 
+async def test_player_logs_resume_after_a_backstop_run(caplog) -> None:
+    # Operator visibility (H14-row): after gap-filling with backstop(s), the player logs an
+    # INFO when normal audio resumes, so a 3am log reader sees the underrun recovered.
+    buf = LookAheadBuffer(maxsize=4)
+    sink = FakeAudioSink()
+    real = _seg(10.0)
+
+    class _LateSleeper(VirtualSleeper):
+        async def sleep(self, seconds: float) -> None:
+            await super().sleep(seconds)
+            if len(self.slept) == 2:  # deliver after one backstop gap-fill
+                await buf.put(real)
+
+    with caplog.at_level(logging.INFO, logger="pirate_radio.pipeline.player"):
+        await _player(buf, sink, _LateSleeper(), silence=0.0).run(count=1)
+    assert sink.played[0] is _BACKSTOP and sink.played[1] is real.audio
+    # the resume INFO must come AFTER the backstop WARNING (bound to recovery, not unconditional)
+    levels = [(r.levelno, r.getMessage().lower()) for r in caplog.records]
+    backstop_idx = next(i for i, (lv, m) in enumerate(levels) if lv == logging.WARNING)
+    resume_idx = next(i for i, (lv, m) in enumerate(levels) if lv == logging.INFO and "resume" in m)
+    assert resume_idx > backstop_idx
+
+
+async def test_clean_run_logs_no_resume(caplog) -> None:
+    # Negative: a run with no underrun must NOT emit a resume INFO (it's bound to recovery).
+    buf = LookAheadBuffer(maxsize=4)
+    await buf.put(_seg(10.0))
+    await buf.put(_seg(20.0))
+    sink = FakeAudioSink()
+    with caplog.at_level(logging.INFO, logger="pirate_radio.pipeline.player"):
+        await _player(buf, sink, VirtualSleeper(), silence=0.0).run(count=2)
+    assert not any("resume" in r.getMessage().lower() for r in caplog.records)
+
+
 async def test_segment_arriving_within_first_budget_skips_the_backstop() -> None:
     # If the refill lands within the first budget wait, the player plays it directly — no
     # backstop, exactly one budget recorded. (The fast path that distinguishes a momentary

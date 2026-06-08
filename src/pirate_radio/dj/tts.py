@@ -62,8 +62,13 @@ def build_piper_argv(binary: str, model: Path, out_path: str, *, speed: float) -
     if speed <= 0:
         raise ProviderFatal(f"piper: speed must be > 0, got {speed}")
     return [
-        binary, "--model", str(model), "--output_file", out_path,
-        "--length_scale", repr(1.0 / speed),  # speed MATH is here, unit-tested
+        binary,
+        "--model",
+        str(model),
+        "--output_file",
+        out_path,
+        "--length_scale",
+        repr(1.0 / speed),  # speed MATH is here, unit-tested
     ]
 
 
@@ -72,10 +77,15 @@ def build_espeak_argv(binary: str, cfg: EspeakTTSConfig, out_path: str) -> list[
     if cfg.speed <= 0:
         raise ProviderFatal(f"espeak: speed must be > 0, got {cfg.speed}")
     return [
-        binary, "-v", cfg.voice,
-        "-s", str(round(175 * cfg.speed)),  # ~175 wpm default; speed MATH here
-        "-p", str(cfg.pitch),  # 0..99
-        "-w", out_path,
+        binary,
+        "-v",
+        cfg.voice,
+        "-s",
+        str(round(175 * cfg.speed)),  # ~175 wpm default; speed MATH here
+        "-p",
+        str(cfg.pitch),  # 0..99
+        "-w",
+        out_path,
         "--stdin",
     ]
 
@@ -134,7 +144,10 @@ class PiperTTS:
         with tempfile.NamedTemporaryFile(suffix=".wav") as tmp:  # H15: per-call, unique
             argv = build_piper_argv(self._binary, self._model, tmp.name, speed=self._cfg.speed)
             proc = subprocess.run(  # pragma: no cover  (R20: the ONLY hardware line)
-                argv, input=text.encode("utf-8"), capture_output=True, check=False,
+                argv,
+                input=text.encode("utf-8"),
+                capture_output=True,
+                check=False,
                 timeout=self._timeout,
             )
             if proc.returncode != 0:
@@ -171,7 +184,10 @@ class EspeakTTS:
         with tempfile.NamedTemporaryFile(suffix=".wav") as tmp:
             argv = build_espeak_argv(self._binary, self._cfg, tmp.name)
             proc = subprocess.run(  # pragma: no cover  (R20: the ONLY hardware line)
-                argv, input=text.encode("utf-8"), capture_output=True, check=False,
+                argv,
+                input=text.encode("utf-8"),
+                capture_output=True,
+                check=False,
                 timeout=self._timeout,
             )
             if proc.returncode != 0:

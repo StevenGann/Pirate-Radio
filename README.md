@@ -6,7 +6,7 @@ for the full design (the panel-adopted §21 "Review Resolutions" govern).
 
 ## Status
 
-🚧 **Phases 0 and 1 complete; building toward a deployable radio.** **Not yet a deployable
+🚧 **Phases 0–2 complete; building toward a deployable radio.** **Not yet a deployable
 radio** — there is no coordinator/supervisor, no midnight-regeneration loop, and no real
 audio output wired yet (those land in later phases). What exists today is the validated,
 fully-tested foundation through the single-station MVP slice:
@@ -18,9 +18,13 @@ fully-tested foundation through the single-station MVP slice:
   provider-error taxonomy, DJ/audio Protocol seams + fakes, the seeded schedule
   **generator** (R19), `find_now`/**resume** (R11 gap path + R12 re-anchor), the
   look-ahead **playback pipeline** (R11 backstop, virtual-time-testable), the writable
-  `state_dir` (A6), and the mtime-cached catalog (A9). Still **not a deployable radio** —
-  the multi-station coordinator/supervisor, midnight regeneration, systemd units, and real
-  audio output land in later phases.
+  `state_dir` (A6), and the mtime-cached catalog (A9).
+- **Phase 2 — complete (local voice):** real **ffmpeg decode**, **EBU R128 loudness**
+  normalization (`pyloudnorm`), **Piper + espeak-ng** TTS behind the existing Protocols,
+  scipy resampling to one station format, startup **binary preflight**, and loudness-normalized
+  gapless playback. Still **not a deployable radio** — the multi-station coordinator/supervisor,
+  midnight regeneration, systemd units, real audio output, and the AI DJ (LLM patter + ranked
+  failover + ElevenLabs) land in Phases 3–4.
 
 Live status and the resume point are in [`docs/BUILD-LOG.md`](docs/BUILD-LOG.md).
 
@@ -36,6 +40,40 @@ startup. Notable optional knob:
   or `/etc/localtime`). Set it on a minimal/headless Pi with no zone configured — otherwise
   the clock degrades to a fixed UTC offset and **DST transitions are not tracked** (the
   daemon WARNs when this happens and names this variable as the fix).
+
+### Phase 2 runtime prerequisites (system binaries)
+
+Phase 2 (local voice) shells out to three **system binaries** — they are not pip-installed.
+The daemon preflights them at startup (fail-fast, §12) and the error names the fix:
+
+- **ffmpeg** — `apt install ffmpeg` (decode). Override the path with `ffmpeg_binary` in
+  `config.json` if it is not on `PATH`.
+- **espeak-ng** — `apt install espeak-ng` (fallback voice). Found on `PATH` by default.
+- **piper** (primary voice) — **not** the Debian `piper` package (that is an unrelated mouse
+  configurator). Download piper-TTS from <https://github.com/rhasspy/piper/releases>, then set
+  `tts_providers.piper.binary` to its path (there is **no `PATH` fallback** for piper) and put
+  each voice's `{voice}.onnx` in `tts_providers.piper.voices_dir`. **Keep `voices_dir` on fast
+  storage (USB SSD / NVMe), not the boot SD** — piper reloads the model per call.
+
+Annotated `config.json` excerpt for a Phase-2 station:
+
+```jsonc
+{
+  "ffmpeg_binary": "/usr/bin/ffmpeg",        // optional; omit to use PATH
+  "decode_timeout_seconds": 120,             // ffmpeg decode kill-switch (H14)
+  "tts_timeout_seconds": 30,                 // piper/espeak kill-switch (H14)
+  "tts_providers": {
+    "piper":  { "binary": "/opt/piper/piper", "voices_dir": "/mnt/ssd/voices" },
+    "espeak": { }                            // binary omitted -> resolved from PATH
+  },
+  "stations": [{
+    "name": "PiRate One",
+    "tts": [{ "backend": "piper", "voice": "en_US-ryan-high", "speed": 1.0 }],
+    "loudness_target_lufs": -16.0            // EBU R128 target; range -40..0
+    /* ... schedule_dir, content_dir, audio_device, dj_personality, ... */
+  }]
+}
+```
 
 ## Development
 
@@ -57,7 +95,7 @@ mypy
 pytest -m "not hardware"
 ```
 
-Current gate: ruff + mypy clean, **267 tests**, ~98% coverage.
+Current gate: ruff + mypy clean, **371 tests**, ~99% coverage.
 
 ### Testing philosophy
 

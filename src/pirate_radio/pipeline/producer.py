@@ -9,11 +9,13 @@ retryable-vs-terminal failover wrapper is Phase 3; Phase 1 backstops any Provide
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Sequence
 
 from pirate_radio.audio.buffer import AudioBuffer
 from pirate_radio.audio.decode import Decoder
+from pirate_radio.audio.loudness import normalize_to
 from pirate_radio.dj.protocols import TTSEngine
 from pirate_radio.errors import ProviderError
 from pirate_radio.pipeline.buffer import LookAheadBuffer
@@ -45,6 +47,13 @@ def announcement_text(item: ScheduleItem) -> str:
     raise ValueError(f"no announcement text for item kind {item.kind!r}")  # TrackItem
 
 
+def _item_label(item: ScheduleItem) -> str:
+    """A human label for the loudness clamp WARNING (H17)."""
+    if isinstance(item, TrackItem):
+        return str(item.track.path)
+    return item.kind
+
+
 class Producer:
     def __init__(
         self,
@@ -54,22 +63,28 @@ class Producer:
         decoder: Decoder,
         buffer: LookAheadBuffer,
         backstop: AudioBuffer,
+        loudness_target_lufs: float = -16.0,
     ) -> None:
         self._items = items
         self._tts = tts
         self._decoder = decoder
         self._buffer = buffer
-        self._backstop = backstop
+        self._backstop = backstop  # pre-normalized once by the caller; never re-normalized here
+        self._target_lufs = loudness_target_lufs
 
     async def run(self) -> None:
         for item in self._items:
             try:
                 audio = await self._render(item)
+                label = _item_label(item)
+                audio = await asyncio.to_thread(  # Q9/R23: R128 is CPU work, off the loop
+                    normalize_to, audio, target_lufs=self._target_lufs, track_label=label
+                )
             except ProviderError as exc:
                 logger.warning(
                     "render failed for %s item (%s) -> backstop (R11/R15)", item.kind, exc
                 )
-                audio = self._backstop
+                audio = self._backstop  # already at the station target; not re-normalized
             await self._buffer.put(RenderedSegment(item=item, audio=audio))
 
     async def _render(self, item: ScheduleItem) -> AudioBuffer:

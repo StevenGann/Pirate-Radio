@@ -40,6 +40,7 @@ class Player:
 
     async def run(self, *, count: int) -> None:
         for _ in range(count):
+            backstops = 0  # consecutive gap-fill backstops before this item aired
             seg = self._buffer.get_nowait()
             if seg is None:  # momentary miss: give the producer one budget to deliver
                 await self._sleeper.sleep(self._budget)
@@ -49,8 +50,11 @@ class Player:
                     "refill missed %.2fs budget -> backstop gap-fill (R11)", self._budget
                 )
                 await self._sink.play(self._backstop)
+                backstops += 1
                 await self._sleeper.sleep(self._budget)
                 seg = self._buffer.get_nowait()
+            if backstops:  # operator visibility (H14): normal audio recovered after an underrun
+                logger.info("normal audio resumed after %d backstop gap-fill(s)", backstops)
             await self._sink.play(seg.audio)  # the real item always airs (P1: never dropped)
             if self._silence > 0:  # §10 inter-element transition silence
                 await self._sink.play(

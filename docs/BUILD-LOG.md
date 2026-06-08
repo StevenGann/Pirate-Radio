@@ -86,7 +86,7 @@ virtual-time/Sleeper-seam contract (P2) nailed. All committed; resume is lossles
   (QA + Senior Dev + Devil's Advocate, the highest-signal for test quality) given
   overnight throughput; the final deep-dive uses all seven.
 
-### Phase 2 — Local voice (Piper, loudness)  — PLAN ADOPTED
+### Phase 2 — Local voice (Piper, loudness)  — ✅ COMPLETE
 - [x] Implementation plan authored (planner) + full seven-agent review. Rev 1 **2 AYE / 5
   NAY** → revised → Rev 2 **6 AYE / 1 NAY → adopted** (`0016`). DA's lone-NAY CRITICAL folded
   in as binding amendment A1 (wire `preflight_binaries` into `load_config(preflight=True)`)
@@ -117,8 +117,16 @@ virtual-time/Sleeper-seam contract (P2) nailed. All committed; resume is lossles
   timeout; H16 piper explicit-binary) — focused panel Rev1 2-NAY → Rev2 **2 AYE / 0 NAY**;
   folded direct map tests, espeak argv spy, 1e-7 golden, non-bypassable resample. `0021`.
   364 tests, 98.74% cov, tts.py 100%.
-- [ ] P2-6 producer loudness wiring (asyncio.to_thread, Q9) + run_once threading (C3) + player
-  format/desync assert (C4) + backstop logging + README prereqs (H19) — **next, the capstone.**
+- [x] P2-6 producer loudness wiring (normalize each segment via asyncio.to_thread, Q9) +
+  run_once threading (C3) + format-desync assert (C4) + player resume logging + README Phase-2
+  prereqs (H19) — focused panel Rev1 (QA AYE-cond/DA NAY) → Rev2 **2 AYE / 0 NAY**; folded the
+  normalize-result-enqueued marker test, nothing-aired desync assert, order-bound resume + negative.
+  `0022`. 371 tests, 98.76% cov, pipeline 100%.
+- **Phase 2 COMPLETE** — P2-1..P2-6 all green. Real decode (ffmpeg), EBU R128 loudness, Piper +
+  espeak TTS, binary preflight, loudness-normalized gapless playback. Carry-forward (Phase 4):
+  run_once can't verify decoder/TTS *actual* rate vs declared (coordinator's job). Still NOT a
+  deployable radio (no coordinator/supervisor/midnight-regen/systemd/real-sink; AI DJ + ranked
+  failover + ElevenLabs = Phase 3).
 ### Phase 3 — AI DJ (LLM patter, ranked failover)  — NOT STARTED
 ### Phase 4 — Multi-station (supervisor, systemd)  — NOT STARTED
 ### Phase 5 — Offline tagging tool  — NOT STARTED
