@@ -33,8 +33,13 @@ code-quality + documentation review. See memory `overnight-autonomous-build`.
   NAY → adopted**; DA's two post-adoption blockers (false overflow assertion → guaranteed
   residual-gap invariant; loose transition-duration bound → drift relationship) both folded in.
   `0011`. 211 tests, 98.29% cov, generator.py 100%.
-- [ ] P1-5 `schedule/resume.py` (find_now R11/R12, P6, H4) — **next.** Lands the committed
-  golden-JSON cross-run determinism guard (P5) alongside resume.
+- [x] P1-5 `schedule/resume.py` (`find_now` → typed `NowPlaying`; R11 gap path, R12 re-anchor,
+  H4 anchor-once + binary search) — focused 3-panel **3 AYE / 0 NAY**; folded strictly-increasing
+  starts invariant + R11 gap assertion + single-item/patter-first/inclusive-start coverage.
+  Wrong-patter-duration & patter-first-drift scoped to Phase 2 (StubTTS is deterministic).
+  Applied the deferred §6 design-doc correction (H13). `0012`. 227 tests, 98.39% cov, resume.py 100%.
+- [ ] P1-6 `pipeline/` (P1 no-drop, P2 Sleeper-seam, R21) · P1-7 config state_dir (A6) · P1-8 catalog cache (A9)
+- NOTE: the committed golden-JSON cross-run determinism guard (P5) still pending — fold into P1-6/P1-8.
 - [ ] P1-6 `pipeline/` (P1 no-drop, P2 Sleeper-seam, R21) · P1-7 config state_dir (A6) · P1-8 catalog cache (A9)
 
 #### Resume handoff (paused mid-Phase-1)

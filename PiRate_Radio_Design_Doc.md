@@ -138,6 +138,16 @@ def find_now(schedule: DailySchedule, now: datetime) -> tuple[ScheduleItem | Non
 
 **Drift:** `planned_start` is an *estimate*, because real TTS length is unknown until synthesis (track durations are exact from metadata). Drift is small and bounded; v1 accepts it. A later refinement re-anchors at hourly station IDs (let the ID float a few seconds, or trim the preceding gap) so drift never compounds past an hour.
 
+> **Phase-1 correction (H13, implemented in `schedule/resume.py`).** The sketch above
+> returns a bare `(item, None)` which is ambiguous about silence gaps. The shipped
+> implementation returns a typed **`NowPlaying`** — `(item, offset_seconds, next_item,
+> gap_seconds)` — so the two resume rules are explicit: **R11** (a `now` inside a
+> transition-silence gap returns `item=None` *with* `next_item`+`gap_seconds`, never
+> undefined dead air) and **R12** (the timeline is *re-anchored* — rebuilt from the
+> first item's exact start plus each item's duration and the known silence — so a
+> drifted stored `planned_start` cannot mislead playback). The lookup is anchored once
+> and answered per tick by binary search (**H4**). See `docs/decisions/0011`–`0012`.
+
 ## 7. Content Organization & Catalog
 
 - The station's `content_dir` contains one **subfolder per group** (`classical/`, `oldies/`, `radio_plays/`, …).
