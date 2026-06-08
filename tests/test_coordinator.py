@@ -213,6 +213,9 @@ async def test_run_gathers_the_supervisor_over_all_stations(tmp_path, monkeypatc
 
     monkeypatch.setattr(coord._supervisor, "run", _fake_supervise)
     monkeypatch.setattr(coord, "_summary_loop", lambda: _noop())
+    monkeypatch.setattr(
+        coord._midnight, "run", lambda: _noop()
+    )  # P4-7 task; its own suite covers it
     await coord.run()
     assert supervised and [u.name for u in supervised[0]] == ["Pi0", "Pi1"]
 

@@ -9,10 +9,13 @@ the §A budget once: ``depth = max worst-consecutive-patter + 1`` across station
 a deterministic per-station **stagger**, and a cold-start **WARNING** for the irreducible
 opening-cluster residual (R11-covered). Build one ``Station`` per config station wired to the
 injected ``sink_factory`` (the coordinator never imports ``sounddevice``), own the ``StationStatus``
-registry + the periodic "N/N ON AIR" summary, and ``run()`` gathers the supervisor + the summary.
+registry + the periodic "N/N ON AIR" summary, and ``run()`` gathers the supervisor + the midnight
+task (P4-7, schedule day-roll) + the summary, concurrently.
 
-The day-roll **prewarm** and the **midnight** task land with P4-7 (they need the day-roll Event that
-the midnight task sets); this module ships everything testable without that signal.
+Audio-buffer day-roll **prewarm** (rendering the opening cluster during the outgoing day's final
+item) is deferred — it would span the day boundary inside the FROZEN ``run_once`` (Q1). The midnight
+task delivers the **schedule prewarm** (new day's file ready before the splice); the residual
+is the same bounded one-cluster R11 backstop as a cold start. Flagged for the P4-9 deep-dive.
 """
 
 from __future__ import annotations
@@ -114,12 +117,16 @@ class Coordinator:
         self._decoder = (decoder_factory or self._build_decoder)()
         self._llm_cache: dict[object, RankedTextGenerator] = {}  # §5.1 shared-chain cache
 
+        from pirate_radio.midnight import MidnightTask
         from pirate_radio.supervisor import Supervisor
 
         self._supervisor = Supervisor(sleeper=sleeper, on_escalate=self._on_escalate)
         self.registry: dict[str, StationStatus] = {}
         self.depth: int = 1
         self.stations: list[Station] = self._build_stations(ram_budget_bytes)
+        # The midnight task rolls every station's schedule at 00:00 (DST-correct, per-station
+        # isolated, file-then-event). It shares the Stations' own day-roll Events (§E/Q2).
+        self._midnight = MidnightTask(stations=self.stations, clock=clock, sleeper=sleeper)
 
     # ---- build-once -----------------------------------------------------------------------
     def _build_decoder(self) -> Decoder:  # pragma: no cover - the real-decoder boot line (R20-ish)
@@ -271,5 +278,10 @@ class Coordinator:
             await self._sleeper.sleep(self._summary_period)
 
     async def run(self) -> None:
-        """Supervise every station + log the periodic summary, concurrently (R7 tier-2)."""
-        await asyncio.gather(self._supervisor.run(self.stations), self._summary_loop())
+        """Supervise every station + roll schedules at midnight + log the periodic summary,
+        concurrently (R7 tier-2). A crash/escalation in one never cancels the siblings."""
+        await asyncio.gather(
+            self._supervisor.run(self.stations),
+            self._midnight.run(),
+            self._summary_loop(),
+        )

@@ -88,6 +88,18 @@ class Station:
         self._on_status = on_status
         self._poisoned: set[int] = set()  # supervisor advance-past-poison net (defensive)
 
+    def prepare_next_day(self) -> None:
+        """Generate + persist the schedule for the clock's current day if absent (the midnight task
+        calls this just after the roll, BEFORE ``signal_day_roll`` — the file-then-event ordering,
+        §E/Q2). Reuses ``_load_or_generate`` so cold-start, restart, and day-roll share one path."""
+        self._load_or_generate(self._clock.now().date())
+
+    def signal_day_roll(self) -> None:
+        """Set the day-roll Event (the midnight task calls this AFTER ``prepare_next_day`` has
+        written the new day's file). The ``run`` loop, parked on ``day_roll.wait()`` at end of day,
+        wakes and re-slices onto the freshly-written schedule."""
+        self._day_roll.set()
+
     def skip_item(self, index: int) -> None:
         """Record a poison item index (the supervisor calls this after K crashes). The producer
         backstops render-poison in-band; this is the net for a crash that escapes the producer."""

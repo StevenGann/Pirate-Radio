@@ -106,6 +106,27 @@ def test_load_or_generate_regenerates_on_corruption(tmp_path, monkeypatch) -> No
     assert out is gen and written and written[0][1] is gen  # regenerated AND persisted (R6)
 
 
+def test_prepare_next_day_generates_and_persists(tmp_path, monkeypatch) -> None:
+    # the midnight task calls this just after the roll; it must write the new day's file (§E/Q2)
+    def _corrupt(*a, **k):
+        raise StateCorruptionError("absent", path=Path("x"))
+
+    monkeypatch.setattr("pirate_radio.station.load_with_recovery", _corrupt)
+    monkeypatch.setattr("pirate_radio.station.generate_schedule", lambda **k: _schedule())
+    written: list = []
+    monkeypatch.setattr(
+        "pirate_radio.station.atomic_write_json", lambda p, m, **k: written.append(p)
+    )
+    _station(tmp_path).prepare_next_day()
+    assert written  # the schedule FILE is written (before the event is ever set)
+
+
+def test_signal_day_roll_sets_the_event(tmp_path) -> None:
+    ev = asyncio.Event()
+    _station(tmp_path, day_roll=ev).signal_day_roll()
+    assert ev.is_set()  # the run loop, parked on day_roll.wait(), will wake and re-slice
+
+
 async def test_run_plays_the_day_then_awaits_dayroll(tmp_path, monkeypatch) -> None:
     played = asyncio.Event()
     calls: list = []
