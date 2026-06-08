@@ -22,11 +22,14 @@ import numpy as np
 from pirate_radio.audio.buffer import DEFAULT_SAMPLE_RATE, AudioBuffer
 from pirate_radio.audio.resample import to_rate
 from pirate_radio.config import (
+    ElevenLabsProviderConfig,
+    ElevenLabsTTSConfig,
     EspeakProviderConfig,
     EspeakTTSConfig,
     PiperProviderConfig,
     PiperTTSConfig,
 )
+from pirate_radio.dj._http import map_http_status, map_httpx_exception
 from pirate_radio.errors import ProviderError, ProviderFatal, ProviderUnavailable
 
 logger = logging.getLogger(__name__)
@@ -193,3 +196,87 @@ class EspeakTTS:
             if proc.returncode != 0:
                 raise _map_tts_error("espeak", proc.returncode, proc.stderr)
             return wav_bytes_to_buffer(Path(tmp.name).read_bytes())
+
+
+# ---- ElevenLabs cloud TTS (D5) — mirrors PiperTTS over httpx instead of subprocess ---------
+_ELEVEN_BASE = "https://api.elevenlabs.io/v1/text-to-speech"
+
+
+def build_elevenlabs_request(
+    cfg: ElevenLabsTTSConfig, *, base_url: str = _ELEVEN_BASE
+) -> tuple[str, dict[str, object]]:
+    """PURE: (url, json body) for an ElevenLabs TTS call. voice_id -> URL;
+    stability/similarity_boost -> voice_settings. ``text`` is filled by ``synthesize``."""
+    url = f"{base_url.rstrip('/')}/{cfg.voice_id}"
+    body: dict[str, object] = {
+        "text": "",
+        "voice_settings": {"stability": cfg.stability, "similarity_boost": cfg.similarity_boost},
+    }
+    return url, body
+
+
+def pcm_s16le_to_buffer(raw: bytes, *, sample_rate: int, channels: int = 1) -> AudioBuffer:
+    """PURE: ElevenLabs raw PCM (s16le) -> AudioBuffer at ``sample_rate``. Mirrors the Phase-2
+    WAV parser's guards: empty / non-frame-aligned -> ProviderFatal. Divisor is /32768 (NOT
+    /32767) — pinned by the 1e-7 golden test."""
+    if len(raw) == 0:
+        raise ProviderFatal("elevenlabs: empty audio body")
+    bytes_per_frame = 2 * channels
+    if len(raw) % bytes_per_frame != 0:
+        raise ProviderFatal(
+            f"elevenlabs: PCM length {len(raw)} not divisible by frame size {bytes_per_frame}"
+        )
+    ints = np.frombuffer(raw, dtype="<i2").astype(np.float32) / np.float32(32768.0)
+    samples = np.ascontiguousarray(ints.reshape(-1, channels), dtype=np.float32)
+    return AudioBuffer(samples, sample_rate, channels)
+
+
+class ElevenLabsTTS:
+    """Cloud TTS (D5), ranked alongside Piper (the local floor). httpx, native async (R23).
+
+    Requests s16le PCM at a known rate (output_format=pcm_24000), parses it like Piper, then
+    resamples to the station rate via ``to_rate`` (H5). The ONE network line is pragma:no cover
+    (R20); the HTTP error mappers come from ``dj/_http`` (NOT dj/text — no sibling import)."""
+
+    _REQUEST_RATE = 24_000  # ElevenLabs pcm_24000 output_format; resampled to the station rate
+
+    def __init__(
+        self,
+        *,
+        cfg: ElevenLabsTTSConfig,
+        provider: ElevenLabsProviderConfig,  # noqa: ARG002 — kept for build.py call symmetry
+        api_key: str,
+        sample_rate: int = DEFAULT_SAMPLE_RATE,
+        timeout_seconds: float = 30.0,  # H14/H23
+    ) -> None:
+        self._cfg = cfg
+        self._api_key = api_key
+        self._sample_rate = sample_rate
+        self._timeout = timeout_seconds
+
+    async def synthesize(self, text: str) -> AudioBuffer:
+        if not text.strip():
+            return AudioBuffer.silence(seconds=0.0, sample_rate=self._sample_rate)
+        url, body = build_elevenlabs_request(self._cfg)
+        body["text"] = text
+        raw = await self._fetch(url, body)
+        buf = pcm_s16le_to_buffer(raw, sample_rate=self._REQUEST_RATE)  # PURE
+        return to_rate(buf, self._sample_rate)  # H5: to the station rate
+
+    async def _fetch(self, url: str, body: dict[str, object]) -> bytes:
+        import httpx  # R21: lazy — never imported at module scope / on the faked path
+
+        headers = {"xi-api-key": self._api_key, "accept": "audio/pcm"}
+        params = {"output_format": f"pcm_{self._REQUEST_RATE}"}
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:  # pragma: no cover
+                resp = await client.post(  # pragma: no cover
+                    url, headers=headers, params=params, json=body
+                )
+                if resp.status_code >= 400:  # pragma: no cover
+                    raise map_http_status("elevenlabs", resp.status_code, resp.text)
+                return resp.content  # pragma: no cover
+        except ProviderError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — re-typed by the pure mapper
+            raise map_httpx_exception("elevenlabs", exc) from exc

@@ -17,8 +17,9 @@ import logging
 import os
 from pathlib import Path
 from typing import Annotated, Literal
+from urllib.parse import urlparse
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 from pirate_radio.audio_devices import AudioDeviceResolver, PortId
 from pirate_radio.catalog.scanner import scan_catalog
@@ -114,6 +115,16 @@ class OllamaLLMConfig(BaseModel):
     backend: Literal["ollama"]
     model: str
     endpoint: str  # self-hosted LAN server (D2), not on-Pi inference
+
+    @field_validator("endpoint")
+    @classmethod
+    def _check_endpoint(cls, v: str) -> str:
+        """Minimal shape check (§4.7): must be an http(s):// URL WITH a host, so a typo fails at
+        boot, not at first patter (a scheme-only 'http://' would build 'http:///api/chat')."""
+        parsed = urlparse(v)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise ConfigError(f"ollama endpoint must be an http(s):// URL with a host, got {v!r}")
+        return v
 
 
 LLMProviderConfig = Annotated[
@@ -246,6 +257,7 @@ def _validate_config(config: DaemonConfig, *, resolver: AudioDeviceResolver, wee
     _check_unique_station_names(config)
     _check_audio_devices(config, resolver)
     _check_env_vars_present(config)
+    _check_tts_env_vars_present(config)
     _check_state_dir(config)
     for station in config.stations:
         _check_station_dirs(station, weekday)
@@ -311,6 +323,23 @@ def _check_env_vars_present(config: DaemonConfig) -> None:
     missing = sorted(n for n in needed if not os.environ.get(n, "").strip())
     if missing:
         raise ConfigError(f"required environment variables not set or empty: {missing}")
+
+
+def _check_tts_env_vars_present(config: DaemonConfig) -> None:
+    """Phase-3 (0010 cloud half): a station using a cloud TTS backend must have its
+    ``api_key_env`` set AND non-empty at boot (A1). Mirrors the LLM ``_check_env_vars_present``.
+    A station declaring ``elevenlabs`` with no ``tts_providers.elevenlabs`` block is a clean
+    boot error (``provider()`` raises ConfigError), not a die-at-first-synth false floor."""
+    backends = {tts.backend for s in config.stations for tts in s.tts}
+    needed: set[str] = set()
+    if "elevenlabs" in backends:
+        prov = config.provider("elevenlabs")  # raises ConfigError if the block is missing
+        if not isinstance(prov, ElevenLabsProviderConfig):  # defensive; keeps mypy honest
+            raise ConfigError("tts_providers.elevenlabs is not an ElevenLabsProviderConfig")
+        needed.add(prov.api_key_env)
+    missing = sorted(n for n in needed if not os.environ.get(n, "").strip())
+    if missing:
+        raise ConfigError(f"required TTS environment variables not set or empty: {missing}")
 
 
 def _check_station_dirs(station: StationConfig, weekday: int) -> None:

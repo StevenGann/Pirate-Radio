@@ -147,7 +147,16 @@ virtual-time/Sleeper-seam contract (P2) nailed. All committed; resume is lossles
   → P3-8 producer wiring.
 - **Phase-4 carry-forwards opened:** summed-timeout refill budget (DA); fall-through WARNING de-dup
   (Old Man); config→constructor timeout threading detail (P3-7).
-- **RESUME POINT: start P3-1 tests-first** (`dj/context.py` DjContext/BlockContext/TrackMeta, R16).
+- **P3-1 ✅** `dj/context.py` (DjContext/BlockContext/TrackMeta, R16; year bounded; H26-safe) — `0024`.
+- **P3-2 ✅** `dj/prompts.py` (grounded "invent nothing" prompts; `_sanitize` H26 in-path) — `0025`.
+- **P3-3 ✅** narrow `patter`→`DjContext|None` + `ScriptedDJ` fake (mypy-strict gate) — `0026`.
+- **P3-4 ✅** `dj/failover.py` (ranked, skip-on-Fatal, TOTAL floor, R15/§9.3) — `0027`.
+- **P3-5 ✅** `dj/_http.py` + `dj/text.py` (Claude/DeepSeek/Ollama; anthropic pinned 0.107; R21
+  positive import-guard + ast guard; real to_thread offload; H22 backend secret tests) — `0028`.
+  Deps added: `anthropic>=0.107,<1`, `httpx>=0.27,<1`; new `network` marker (env-gated live smokes).
+- Gate after P3-5: **507 tests** (3 network smokes skip, 2 hardware), 98.69% cov, ruff/mypy clean.
+- **RESUME POINT: start P3-6 tests-first** — `ElevenLabsTTS` (mirror Piper, D5) + cloud-credential
+  preflight (0010 cloud half) + Ollama endpoint shape validation in `config.py`.
 ### Phase 4 — Multi-station (supervisor, systemd)  — NOT STARTED
 ### Phase 5 — Offline tagging tool  — NOT STARTED
 ### Phase 6 — Control API (FastAPI, in v1 per D4)  — NOT STARTED
