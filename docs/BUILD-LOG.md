@@ -127,7 +127,27 @@ virtual-time/Sleeper-seam contract (P2) nailed. All committed; resume is lossles
   run_once can't verify decoder/TTS *actual* rate vs declared (coordinator's job). Still NOT a
   deployable radio (no coordinator/supervisor/midnight-regen/systemd/real-sink; AI DJ + ranked
   failover + ElevenLabs = Phase 3).
-### Phase 3 — AI DJ (LLM patter, ranked failover)  — NOT STARTED
+### Phase 3 — AI DJ (LLM patter, ranked failover)  — PLAN ADOPTED (building)
+- **Plan adopted 2026-06-08, 7 AYE / 0 NAY** after one revision round (Rev 1 → Rev 2 under the
+  ≥2-NAY charter). Plan: `docs/plans/phase-3-implementation-plan.md`; vote + must-fix audit trail:
+  `docs/decisions/0023-phase3-plan-adopted.md`.
+- **Rev-1 → Rev-2 must-fixes:** intro/outro TrackItem no longer drops the song (decode every
+  TrackItem; segment assembly → Phase 4); no cross-sibling `tts→text` import (mappers + `post_json`
+  → new `dj/_http.py`); `build_tts_engine` total (exhaustive `else: raise` + empty-chain guard +
+  explicit raise, no `assert`); failover floor total (`_ranked_call` catches every exc, re-types
+  non-ProviderError → Unavailable); P3-8 back-compat defaults (existing ~13 call sites stay valid);
+  real offload proof (`get_ident` + `sys.modules` import-guard + grep guard); `anthropic` pin gated
+  PLACEHOLDER (verified-live 0.107.1, resolve at P3-5); ElevenLabs 401 dual-meaning; QA's 12 named
+  tests + H26 `_sanitize` newline-strip; Field-Op degrade WARNING + README prereqs.
+- **Ratified rulings:** skip-on-Fatal, `DjContext | None`, PCM whole-clip, deps `anthropic`+`httpx`,
+  no in-place retry, rate-limit → Phase 4.
+- **Increment order (strict spec-driven TDD each):** P3-1 `dj/context.py` → P3-2 `dj/prompts.py`
+  → P3-3 Protocol narrow + `ScriptedDJ` → P3-4 `dj/failover.py` → P3-5 `dj/_http.py` + `dj/text.py`
+  (anthropic pin resolved FIRST) → P3-6 `ElevenLabsTTS` + cloud preflight → P3-7 `dj/build.py`
+  → P3-8 producer wiring.
+- **Phase-4 carry-forwards opened:** summed-timeout refill budget (DA); fall-through WARNING de-dup
+  (Old Man); config→constructor timeout threading detail (P3-7).
+- **RESUME POINT: start P3-1 tests-first** (`dj/context.py` DjContext/BlockContext/TrackMeta, R16).
 ### Phase 4 — Multi-station (supervisor, systemd)  — NOT STARTED
 ### Phase 5 — Offline tagging tool  — NOT STARTED
 ### Phase 6 — Control API (FastAPI, in v1 per D4)  — NOT STARTED
