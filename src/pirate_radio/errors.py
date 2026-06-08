@@ -58,6 +58,22 @@ class StateCorruptionError(PirateRadioError):
         self.path = path
 
 
+class PoisonItemError(PirateRadioError):
+    """A schedule item whose render crashed with a NON-``ProviderError`` exception (a C-level
+    decode crash surfaced as a Python exception, ``MemoryError``, a malformed-header error).
+
+    Distinct from ``ProviderError`` (the retryable in-band path that fires the R11 backstop): a
+    ``ProviderError`` is handled by the producer; a ``PoisonItemError`` escapes to the R7 tier-2
+    supervisor, which keys advance-past-poison on the carried **item index** (NOT a clock offset,
+    which drifts every restart) — after K crashes attributed to the same index, the item's slot is
+    skipped (backstopped) so a render-poison item can never infinite-loop (Phase-4 C2 fix)."""
+
+    def __init__(self, item_index: int, cause: BaseException) -> None:
+        super().__init__(f"item {item_index} render poisoned: {type(cause).__name__}: {cause}")
+        self.item_index = item_index
+        self.cause = cause
+
+
 class ProviderError(PirateRadioError):
     """Base for any TTS/LLM/decode backend failure (R15).
 

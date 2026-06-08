@@ -207,7 +207,8 @@ virtual-time/Sleeper-seam contract (P2) nailed. All committed; resume is lossles
   P4-9 housekeeping + Phase-4 deep-dive. Each strict spec-driven TDD (focused-panel TEST review).
 - **P4-1 ✅** `audio/sink.py` `SoundDeviceSink` (persistent gapless stream, dedicated executor, xrun-glitch recovery, lifecycle teardown; R20/R21) — `0035`. Gate: 583 tests, 98.51%, ruff/mypy clean; sink.py 97%. Deps: `sounddevice>=0.4,<1` (+libportaudio2 apt note).
 - **P4-2 ✅** `UdevAudioDeviceResolver` (port-path keyed, NOT serial; PortAudio↔ALSA bridge; ambiguous→None; enumeration-only-hardware) + `docs/ops/udev-audio.md` — `0036`. DA caught index-vs-port_path indistinguishability + missing hardware smoke. Gate: 597 tests, 98.53%, clean.
-- **RESUME POINT: build P4-3** (`supervisor.py` R7 tier-2 + `status.py` StationStatus) tests-first.
+- **P4-3 ✅** `supervisor.py` (R7 tier-2: restart-to-known-good, sibling isolation+concurrency, advance-past-poison keyed on item INDEX + bounded skip budget, ceiling→injected on_escalate, multi-pattern secret-scrub) + `status.py` (StationStatus, on_air vs airing_backstop) + `PoisonItemError` — `0037`. DA caught no-skip_item infinite-loop + unbounded-skip starvation + per-index counting; gather-swallows-SystemExit → prod on_escalate must os._exit. Gate: 622 tests, 98.55%, clean.
+- **RESUME POINT: build P4-4** (`pipeline/daily.py` slice_from_now + seek-guard + gap silence; thread `recent_tracks`) tests-first.
   deep-dive-validated; gate 568 tests / 98.56% / ruff+mypy clean.)
 ### Phase 4 — Multi-station (supervisor, systemd)  — NOT STARTED
 ### Phase 5 — Offline tagging tool  — NOT STARTED
