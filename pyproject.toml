@@ -13,6 +13,7 @@ authors = [{ name = "Steven Gann" }]
 dependencies = [
     "pydantic>=2.7,<3",
     "mutagen>=1.47",
+    "PyYAML>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -22,6 +23,7 @@ dev = [
     "pytest-mock>=3.12",
     "ruff>=0.6",
     "mypy>=1.10",
+    "types-PyYAML",
 ]
 
 [tool.setuptools.packages.find]
