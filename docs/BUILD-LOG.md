@@ -107,8 +107,12 @@ virtual-time/Sleeper-seam contract (P2) nailed. All committed; resume is lossles
   — focused panel Rev1 2-NAY → Rev2 **3 AYE / 0 NAY**; folded argv+timeout spy (patched real
   subprocess.run), thread-offload assertion, spaces-in-path, non-UTF-8 stderr, partial-output
   timeout. `0019`. 314 tests (+1 hardware smoke), 98.68% cov, decode.py 99%.
-- [ ] P2-4 typed provider configs + `audio/binaries.py` + preflight wiring (A1) — **next** ·
-  P2-5 `dj/tts.py` Piper/Espeak · P2-6 producer loudness wiring + player format/logging.
+- [x] P2-4 typed `tts_providers` (R16: Piper/Espeak/ElevenLabs provider configs, PrivateAttr
+  stash, `provider()`) + `ffmpeg_binary`/timeouts (H14) + `audio/binaries.py`
+  (resolve_binary/preflight_binaries) + A1 wiring (`load_config(preflight=True)`, H20-separate)
+  — focused panel Rev1 2-NAY → Rev2 **3 AYE / 0 NAY**; folded A1-delta proof, mouse `match`,
+  PrivateAttr copy-safety, H20 negative test, production-remedy matches. `0020`. 334 tests, 98.63% cov.
+- [ ] P2-5 `dj/tts.py` Piper/Espeak — **next** · P2-6 producer loudness wiring + player format/logging.
 ### Phase 3 — AI DJ (LLM patter, ranked failover)  — NOT STARTED
 ### Phase 4 — Multi-station (supervisor, systemd)  — NOT STARTED
 ### Phase 5 — Offline tagging tool  — NOT STARTED

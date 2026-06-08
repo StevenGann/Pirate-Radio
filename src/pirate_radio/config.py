@@ -18,7 +18,7 @@ import os
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from pirate_radio.audio_devices import AudioDeviceResolver, PortId
 from pirate_radio.catalog.scanner import scan_catalog
@@ -58,6 +58,34 @@ class ElevenLabsTTSConfig(BaseModel):
     voice_id: str
     stability: float = 0.5
     similarity_boost: float = 0.75
+
+
+# ---- TTS *provider* configs (R16: shared per-backend settings; Phase 2) ----------
+# tts_providers holds per-backend shared settings (binary paths, voices dir, credentials),
+# keyed by backend name. Promoted from bare dicts to typed models so binaries.py reads
+# attributes, not dicts.
+class PiperProviderConfig(BaseModel):
+    model_config = _FROZEN
+    binary: Path | None = None  # H16: NO PATH fallback (Debian `piper` is a mouse tool)
+    voices_dir: Path  # required: where {voice}.onnx lives (keep on FAST storage — H15)
+
+
+class EspeakProviderConfig(BaseModel):
+    model_config = _FROZEN
+    binary: Path | None = None  # PATH fallback to espeak-ng / espeak is safe
+
+
+class ElevenLabsProviderConfig(BaseModel):
+    model_config = _FROZEN
+    api_key_env: str  # Phase-3 reader (cloud TTS)
+
+
+TTSProviderConfig = PiperProviderConfig | EspeakProviderConfig | ElevenLabsProviderConfig
+_PROVIDER_MODELS: dict[str, type[BaseModel]] = {
+    "piper": PiperProviderConfig,
+    "espeak": EspeakProviderConfig,
+    "elevenlabs": ElevenLabsProviderConfig,
+}
 
 
 TTSConfig = Annotated[
@@ -136,28 +164,62 @@ class StationConfig(BaseModel):
 class DaemonConfig(BaseModel):
     model_config = _FROZEN
     llm: LLMConfig
-    tts_providers: dict[str, dict[str, object]] = Field(default_factory=dict)
+    tts_providers: dict[str, dict[str, object]] = Field(default_factory=dict)  # raw on the wire
+    ffmpeg_binary: Path | None = None  # None -> resolved from PATH at preflight
+    decode_timeout_seconds: float = Field(default=120.0, gt=0)  # H14
+    tts_timeout_seconds: float = Field(default=30.0, gt=0)  # H14
     state_dir: Path  # A6: mutable-state root (schedules, future resume/cache) off the boot SD
     stations: tuple[StationConfig, ...] = Field(min_length=1)
 
+    # Typed views of tts_providers, parsed once at validation (R16). A PrivateAttr so it is
+    # copied by model_copy and stays out of serialization; the raw dict above is the wire form.
+    _typed_providers: dict[str, TTSProviderConfig] = PrivateAttr(default_factory=dict)
+
     @model_validator(mode="after")
-    def _known_tts_provider_backends(self) -> DaemonConfig:
-        # A3: tts_providers holds shared credentials keyed by backend name. Inner
-        # credential keys are validated in Phase 2 when an engine reads them, but a
-        # typo'd *backend* key (e.g. "elevenlabss") is a real boot-catchable error.
+    def _typed_tts_providers(self) -> DaemonConfig:
+        # A3 (kept): a typo'd *backend* key (e.g. "elevenlabss") is a boot-catchable error.
         unknown = sorted(set(self.tts_providers) - _KNOWN_TTS_BACKENDS)
         if unknown:
             raise ConfigError(
                 f"unknown tts_providers backend key(s): {unknown}; "
                 f"known: {sorted(_KNOWN_TTS_BACKENDS)}"
             )
+        # R16: parse each inner dict into its typed model so binaries.py reads attributes,
+        # not bare dicts. A typo'd inner key fails here (extra="forbid").
+        parsed: dict[str, TTSProviderConfig] = {}
+        for key, raw in self.tts_providers.items():
+            try:
+                parsed[key] = _PROVIDER_MODELS[key].model_validate(raw)  # type: ignore[assignment]
+            except ConfigError:
+                raise
+            except Exception as exc:  # pydantic ValidationError
+                raise ConfigError(f"tts_providers.{key}: {exc}") from exc
+        self._typed_providers = parsed  # PrivateAttr: allowed on a frozen model
         return self
 
+    def provider(self, key: str) -> TTSProviderConfig:
+        """Typed provider config for ``key``; espeak defaults to a PATH-lookup config (H15)."""
+        if key in self._typed_providers:
+            return self._typed_providers[key]
+        if key == "espeak":
+            return EspeakProviderConfig()  # H15: no block -> PATH default, NOT a KeyError
+        raise ConfigError(f"no tts_providers block for backend {key!r}")
 
-def load_config(path: Path, *, resolver: AudioDeviceResolver, clock: Clock) -> DaemonConfig:
+
+def load_config(
+    path: Path, *, resolver: AudioDeviceResolver, clock: Clock, preflight: bool = True
+) -> DaemonConfig:
     """Load + fully validate config.json (§12). ``resolver`` injects R10 PortIds;
     ``clock`` (A4) supplies the weekday for the grid-existence check (so clock.py is
-    the only ``datetime.now()`` site)."""
+    the only ``datetime.now()`` site).
+
+    ``preflight`` (A1, default True) runs the boot-time system-binary check AFTER shape +
+    filesystem validation — fail fast when ffmpeg/piper/espeak are missing, rather than at
+    3am on the first render. It is a SEPARATE step (binaries.py), kept out of
+    ``_validate_config`` (H20) so config-shape tests need no real binaries; pass
+    ``preflight=False`` for those. A missing/malformed config file fails at read/JSON-parse
+    below, before preflight ever runs.
+    """
     path = Path(path)
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -172,6 +234,10 @@ def load_config(path: Path, *, resolver: AudioDeviceResolver, clock: Clock) -> D
         raise ConfigError(f"{path}: invalid config: {exc}") from exc
 
     _validate_config(config, resolver=resolver, weekday=clock.now().weekday())
+    if preflight:
+        from pirate_radio.audio.binaries import preflight_binaries  # local: avoid import cycle
+
+        preflight_binaries(config)
     return config
 
 

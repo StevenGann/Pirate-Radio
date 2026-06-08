@@ -16,12 +16,18 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 from pathlib import Path
 
 import pytest
 
 from pirate_radio.audio_devices import StaticAudioDeviceResolver
-from pirate_radio.config import load_config
+from pirate_radio.config import (
+    ElevenLabsProviderConfig,
+    EspeakProviderConfig,
+    PiperProviderConfig,
+    load_config,
+)
 from pirate_radio.errors import ConfigError, PirateRadioError
 
 
@@ -62,7 +68,9 @@ def _write_cfg(tmp_path: Path, data: dict) -> Path:
 
 
 def _load(tmp_path, data, resolver, clock):
-    return load_config(_write_cfg(tmp_path, data), resolver=resolver, clock=clock)
+    # preflight=False (H20/A1): the config suite validates piper-station configs WITHOUT
+    # real binaries; binary preflight is a separate boot step, tested in test_binaries.py.
+    return load_config(_write_cfg(tmp_path, data), resolver=resolver, clock=clock, preflight=False)
 
 
 # --- happy path + discriminated unions (R16) ------------------------------------
@@ -482,3 +490,105 @@ def test_readonly_content_and_schedule_dirs_are_accepted(
     finally:
         grid_yaml.chmod(0o755)
         content_tree.chmod(0o755)
+
+
+# --- R16: typed tts_providers + timeouts + ffmpeg_binary (Phase 2) ----------------
+
+
+def test_typed_piper_provider_parsed(
+    tmp_path, content_tree, grid_yaml, resolver, fixed_clock, monkeypatch
+) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    data = _valid_config(content_tree, grid_yaml)
+    data["tts_providers"] = {"piper": {"binary": "/opt/piper/piper", "voices_dir": "/opt/voices"}}
+    cfg = _load(tmp_path, data, resolver, fixed_clock)
+    prov = cfg.provider("piper")
+    assert isinstance(prov, PiperProviderConfig)
+    assert prov.voices_dir == Path("/opt/voices")
+    assert prov.binary == Path("/opt/piper/piper")
+
+
+def test_piper_provider_extra_inner_key_rejected(
+    tmp_path, content_tree, grid_yaml, resolver, fixed_clock, monkeypatch
+) -> None:
+    # R16: typed inner model with extra="forbid" — a typo'd inner key fails at load.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    data = _valid_config(content_tree, grid_yaml)
+    data["tts_providers"] = {"piper": {"voices_dir": "/v", "speeed": 1}}
+    with pytest.raises(ConfigError):
+        _load(tmp_path, data, resolver, fixed_clock)
+
+
+def test_provider_espeak_defaults_when_no_block(
+    tmp_path, content_tree, grid_yaml, resolver, fixed_clock, monkeypatch
+) -> None:
+    # H15: a station using espeak with no tts_providers.espeak block -> default PATH config,
+    # NOT a KeyError.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    cfg = _load(tmp_path, _valid_config(content_tree, grid_yaml), resolver, fixed_clock)
+    prov = cfg.provider("espeak")
+    assert isinstance(prov, EspeakProviderConfig)
+    assert prov.binary is None  # resolves via PATH at preflight
+
+
+def test_timeouts_default_and_reject_non_positive(
+    tmp_path, content_tree, grid_yaml, resolver, fixed_clock, monkeypatch
+) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    cfg = _load(tmp_path, _valid_config(content_tree, grid_yaml), resolver, fixed_clock)
+    assert cfg.decode_timeout_seconds == 120.0  # H14 default
+    assert cfg.tts_timeout_seconds == 30.0
+    data = _valid_config(content_tree, grid_yaml)
+    data["decode_timeout_seconds"] = 0  # gt=0
+    with pytest.raises(ConfigError):
+        _load(tmp_path, data, resolver, fixed_clock)
+
+
+def test_preflight_true_runs_binary_check_but_false_skips_it(
+    tmp_path, content_tree, grid_yaml, resolver, fixed_clock, monkeypatch
+) -> None:
+    # A1, faithfully: the SAME config loads under preflight=False but is REJECTED under
+    # preflight=True. The delta proves preflight actually ran. ffmpeg is patched present so
+    # the failure is unambiguously the piper path (no tts_providers.piper block), not a
+    # coincidental missing ffmpeg.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")  # ffmpeg present
+    cfg_path = _write_cfg(tmp_path, _valid_config(content_tree, grid_yaml))
+    assert load_config(cfg_path, resolver=resolver, clock=fixed_clock, preflight=False) is not None
+    with pytest.raises(ConfigError, match="piper"):
+        load_config(cfg_path, resolver=resolver, clock=fixed_clock, preflight=True)
+
+
+def test_preflight_false_skips_binary_checks_even_when_absent(
+    tmp_path, content_tree, grid_yaml, resolver, fixed_clock, monkeypatch
+) -> None:
+    # H20: with NO binaries anywhere on PATH, preflight=False must still load — proving the
+    # binary check is fully separate from _validate_config (the whole config suite relies on this).
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    monkeypatch.setattr(shutil, "which", lambda name: None)  # nothing on PATH
+    cfg = _load(tmp_path, _valid_config(content_tree, grid_yaml), resolver, fixed_clock)
+    assert cfg is not None
+
+
+def test_elevenlabs_provider_parsed_to_typed(
+    tmp_path, content_tree, grid_yaml, resolver, fixed_clock, monkeypatch
+) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    data = _valid_config(content_tree, grid_yaml)
+    data["tts_providers"] = {"elevenlabs": {"api_key_env": "ELEVENLABS_API_KEY"}}
+    cfg = _load(tmp_path, data, resolver, fixed_clock)
+    prov = cfg.provider("elevenlabs")
+    assert isinstance(prov, ElevenLabsProviderConfig)
+    assert prov.api_key_env == "ELEVENLABS_API_KEY"
+
+
+def test_typed_provider_survives_model_copy(
+    tmp_path, content_tree, grid_yaml, resolver, fixed_clock, monkeypatch
+) -> None:
+    # The typed-provider stash must survive model_copy (PrivateAttr, not a re-run validator),
+    # else a boot path that copies the config gets a wrong "no block" error for piper.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    data = _valid_config(content_tree, grid_yaml)
+    data["tts_providers"] = {"piper": {"binary": "/p", "voices_dir": "/v"}}
+    cfg = _load(tmp_path, data, resolver, fixed_clock)
+    assert isinstance(cfg.model_copy().provider("piper"), PiperProviderConfig)
