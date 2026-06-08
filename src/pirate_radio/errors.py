@@ -74,6 +74,30 @@ class PoisonItemError(PirateRadioError):
         self.cause = cause
 
 
+class TaggingError(PirateRadioError):
+    """Base for the offline tagger (Phase 5). Sub-leaves let the backoff path branch: a transient
+    or throttled lookup is retried/backed-off; a fatal one (bad config, missing binary, unparseable
+    response) skips the file (or fails fast at startup). Never raised on the broadcast path."""
+
+
+class TaggingUnavailable(TaggingError):
+    """Transient tagger failure (connection refused/timeout, 5xx) — retry/backoff."""
+
+
+class TaggingThrottled(TaggingError):
+    """Rate/throttle response (HTTP 429/503). Carries an optional ``Retry-After`` the backoff honors
+    before re-arming the limiter so the next normal call still respects the per-service spacing."""
+
+    def __init__(self, message: str, *, retry_after_seconds: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
+
+
+class TaggingFatal(TaggingError):
+    """Non-retryable tagger failure: missing ``fpcalc``, unset key/UA, unparseable output, a
+    degenerate file. Fails fast at startup, or skips the one file mid-batch (per-file isolation)."""
+
+
 class ProviderError(PirateRadioError):
     """Base for any TTS/LLM/decode backend failure (R15).
 
