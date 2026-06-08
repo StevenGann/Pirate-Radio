@@ -40,8 +40,10 @@ startup. Notable optional knob:
 ## Development
 
 Requires **Python 3.11+**. The runtime targets **64-bit Raspberry Pi OS (arm64)
-Bookworm** — `numpy` has no 32-bit (armhf) wheel, so a 32-bit image triggers a slow
-source build. Runtime deps: `pydantic`, `mutagen`, `PyYAML`, `numpy`.
+Bookworm** — `numpy`/`scipy` have no 32-bit (armhf) wheels, so a 32-bit image triggers a
+slow source build. Runtime deps: `pydantic`, `mutagen`, `PyYAML`, `numpy`, plus (Phase 2)
+`pyloudnorm` (pure-Python EBU R128) and `scipy` (resampling) — both ship `aarch64`
+cp311/cp312 wheels, so they install cleanly on 64-bit Pi OS.
 
 ```bash
 python -m venv .venv

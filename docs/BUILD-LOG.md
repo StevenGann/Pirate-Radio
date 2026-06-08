@@ -94,8 +94,11 @@ virtual-time/Sleeper-seam contract (P2) nailed. All committed; resume is lossles
   `wave` (drop soundfile), pad-then-measure, loudness `ge=-40/le=0` + WARNING clamp, mono v1
   + one station format, loudness mandatory, separate boot preflight, `normalize_to` via
   `asyncio.to_thread`. Deps: `pyloudnorm>=0.2.0,<0.3`, `scipy>=1.15,<2`.
-- [ ] P2-1 `audio/loudness.py` + deps + `loudness_target_lufs` bound — **next** (tests-first).
-- [ ] P2-2 `audio/resample.py` · P2-3 `audio/decode.py` FfmpegDecoder · P2-4 typed provider
+- [x] P2-1 `audio/loudness.py` (EBU R128 via pyloudnorm; pad-then-measure; clamp+WARNING;
+  immutable) + deps (`pyloudnorm`, `scipy`) + `loudness_target_lufs` `ge=-40,le=0` bound
+  (0010 carry-forward resolved) — focused panel **3 AYE / 0 NAY**; folded A2 tolerance 2.5→0.6,
+  pad-invariant test, DEBUG-passthrough caplog, new-buffer identity. `0017`. 280 tests, 98.58% cov.
+- [ ] P2-2 `audio/resample.py` — **next** · P2-3 `audio/decode.py` FfmpegDecoder · P2-4 typed provider
   configs + `audio/binaries.py` + preflight wiring · P2-5 `dj/tts.py` Piper/Espeak · P2-6
   producer loudness wiring + player format/logging.
 ### Phase 3 — AI DJ (LLM patter, ranked failover)  — NOT STARTED

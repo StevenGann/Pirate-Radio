@@ -429,6 +429,38 @@ def test_unwritable_state_dir_rejected_real_perms(
         sd.chmod(0o755)  # restore so tmp cleanup can remove it
 
 
+def test_loudness_target_in_range_accepted(
+    tmp_path, content_tree, grid_yaml, resolver, fixed_clock, monkeypatch
+) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    data = _valid_config(content_tree, grid_yaml)
+    data["stations"][0]["loudness_target_lufs"] = -23.0  # EBU R128 broadcast target
+    cfg = _load(tmp_path, data, resolver, fixed_clock)
+    assert cfg.stations[0].loudness_target_lufs == -23.0
+
+
+def test_positive_loudness_target_rejected(
+    tmp_path, content_tree, grid_yaml, resolver, fixed_clock, monkeypatch
+) -> None:
+    # LUFS is <= 0 by definition; a positive target is a config error (le=0).
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    data = _valid_config(content_tree, grid_yaml)
+    data["stations"][0]["loudness_target_lufs"] = 5.0
+    with pytest.raises(ConfigError):
+        _load(tmp_path, data, resolver, fixed_clock)
+
+
+def test_absurdly_low_loudness_target_rejected(
+    tmp_path, content_tree, grid_yaml, resolver, fixed_clock, monkeypatch
+) -> None:
+    # A typo'd -160 would silently pass with only le=0; ge=-40 catches gross misconfig.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    data = _valid_config(content_tree, grid_yaml)
+    data["stations"][0]["loudness_target_lufs"] = -160.0
+    with pytest.raises(ConfigError):
+        _load(tmp_path, data, resolver, fixed_clock)
+
+
 def test_readonly_content_and_schedule_dirs_are_accepted(
     tmp_path, content_tree, grid_yaml, resolver, fixed_clock, monkeypatch
 ) -> None:

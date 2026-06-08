@@ -116,7 +116,10 @@ class StationConfig(BaseModel):
     audio_device: str = Field(min_length=1)
     llm: LLMConfig | None = None  # optional per-station override (§12)
     transition_silence_seconds: float = Field(default=2.0, ge=0)
-    loudness_target_lufs: float = -16.0
+    # EBU R128 target; LUFS is <= 0 by definition (le=0), ge=-40 catches typo'd values
+    # like -160 (would otherwise hit the loudness gain clamp silently). Phase-2 carry-forward
+    # from 0010 resolved.
+    loudness_target_lufs: float = Field(default=-16.0, ge=-40.0, le=0.0)
     repeat_window_minutes: int = Field(default=120, ge=0)
 
     @model_validator(mode="after")
