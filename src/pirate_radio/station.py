@@ -61,6 +61,7 @@ class Station:
         sample_rate: int = DEFAULT_SAMPLE_RATE,
         channels: int = 1,
         maxsize: int = _DEFAULT_MAXSIZE,
+        start_delay_seconds: float = 0.0,
         on_status: Callable[[StationStatus], None] | None = None,
     ) -> None:
         self._config = config
@@ -81,6 +82,9 @@ class Station:
         self._sample_rate = sample_rate
         self._channels = channels
         self._maxsize = maxsize
+        self._start_delay = (
+            start_delay_seconds  # §A render-stagger (H-RPi-3); applied once at start
+        )
         self._on_status = on_status
         self._poisoned: set[int] = set()  # supervisor advance-past-poison net (defensive)
 
@@ -115,6 +119,8 @@ class Station:
         return schedule
 
     async def run(self) -> None:
+        if self._start_delay > 0:  # §A stagger: de-sync the first render across stations (H-RPi-3)
+            await self._sleeper.sleep(self._start_delay)
         while True:
             self._status(StationState.STARTING)
             day = self._clock.now().date()
