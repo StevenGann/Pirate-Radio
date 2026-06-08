@@ -49,3 +49,25 @@ class StateCorruptionError(PirateRadioError):
     def __init__(self, message: str, *, path: Path) -> None:
         super().__init__(message)
         self.path = path
+
+
+class ProviderError(PirateRadioError):
+    """Base for any TTS/LLM/decode backend failure (R15).
+
+    Failover (Phase 3) retries only the *retryable* branch (``ProviderUnavailable`` /
+    ``ProviderQuotaExceeded``); ``ProviderFatal`` is terminal for that provider. In
+    Phase 1 the pipeline treats ANY ``ProviderError`` as "render failed -> fire the
+    R11 backstop, never dead air".
+    """
+
+
+class ProviderUnavailable(ProviderError):
+    """Transient: connection refused/timeout, 5xx, model loading. Retryable."""
+
+
+class ProviderQuotaExceeded(ProviderError):
+    """Rate/credit limit hit (HTTP 429 / quota). Retryable against the NEXT provider."""
+
+
+class ProviderFatal(ProviderError):
+    """Non-retryable for this provider: bad request, auth failure, unsupported input."""

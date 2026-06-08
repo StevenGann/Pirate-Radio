@@ -14,6 +14,7 @@ dependencies = [
     "pydantic>=2.7,<3",
     "mutagen>=1.47",
     "PyYAML>=6.0",
+    "numpy>=1.26,<3",  # AudioBuffer (R14); 64-bit Raspberry Pi OS / arm64 only (H8)
 ]
 
 [project.optional-dependencies]

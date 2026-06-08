@@ -26,7 +26,8 @@ code-quality + documentation review. See memory `overnight-autonomous-build`.
   Resolved: Q1 A6-governs (state_dir off boot SD), Q2 exact-track re-anchor,
   Q3 fixed refill default. Must-fix P1–P7, hardening H1–H13.
 - [x] P1-1 `schedule/models.py` (ScheduleItem union + DailySchedule, R17) — focused 3-0 (QA/SeniorDev/DA); folded next_block_starts_at tz, variant-frozen, missing-fields, TrackItem-stray-field. +`--import-mode=importlib`. 155 tests, 98.63% cov.
-- [ ] P1-2 `audio/buffer.py` (AudioBuffer, R14) · P1-3 dj protocols+fakes (R15)
+- [x] P1-2 errors-R15 (ProviderError taxonomy) + `audio/buffer.py` (AudioBuffer R14, DEFAULT_SAMPLE_RATE H5) — focused 3-0; folded channels>=1, fractional-rounding, zero-seconds. numpy dep. 170 tests, 98.73%.
+- [ ] P1-3 dj protocols+fakes (TTSEngine/TextGenerator/AudioSink + NullDJ/StubTTS/FakeAudioSink) — NEXT
 - [ ] P1-4 `schedule/generator.py` (R19, P3 boundary, H1) · P1-5 `schedule/resume.py` (find_now R11/R12, P6, H4)
 - [ ] P1-6 `pipeline/` (P1 no-drop, P2 Sleeper-seam, R21) · P1-7 config state_dir (A6) · P1-8 catalog cache (A9)
 - NOTE: Phase 1 is NOT a deployable radio (no coordinator/supervisor/midnight-regen
