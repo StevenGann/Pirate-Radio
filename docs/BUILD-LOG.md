@@ -86,7 +86,18 @@ virtual-time/Sleeper-seam contract (P2) nailed. All committed; resume is lossles
   (QA + Senior Dev + Devil's Advocate, the highest-signal for test quality) given
   overnight throughput; the final deep-dive uses all seven.
 
-### Phase 2 — Local voice (Piper, loudness)  — NOT STARTED
+### Phase 2 — Local voice (Piper, loudness)  — PLAN ADOPTED
+- [x] Implementation plan authored (planner) + full seven-agent review. Rev 1 **2 AYE / 5
+  NAY** → revised → Rev 2 **6 AYE / 1 NAY → adopted** (`0016`). DA's lone-NAY CRITICAL folded
+  in as binding amendment A1 (wire `preflight_binaries` into `load_config(preflight=True)`)
+  + A2 (short-patter assert-to-target). Resolutions: f32le, scipy `resample_poly`, stdlib
+  `wave` (drop soundfile), pad-then-measure, loudness `ge=-40/le=0` + WARNING clamp, mono v1
+  + one station format, loudness mandatory, separate boot preflight, `normalize_to` via
+  `asyncio.to_thread`. Deps: `pyloudnorm>=0.2.0,<0.3`, `scipy>=1.15,<2`.
+- [ ] P2-1 `audio/loudness.py` + deps + `loudness_target_lufs` bound — **next** (tests-first).
+- [ ] P2-2 `audio/resample.py` · P2-3 `audio/decode.py` FfmpegDecoder · P2-4 typed provider
+  configs + `audio/binaries.py` + preflight wiring · P2-5 `dj/tts.py` Piper/Espeak · P2-6
+  producer loudness wiring + player format/logging.
 ### Phase 3 — AI DJ (LLM patter, ranked failover)  — NOT STARTED
 ### Phase 4 — Multi-station (supervisor, systemd)  — NOT STARTED
 ### Phase 5 — Offline tagging tool  — NOT STARTED
