@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import deque
 from collections.abc import Sequence
 
 from pirate_radio.audio.buffer import AudioBuffer
@@ -36,10 +37,18 @@ logger = logging.getLogger(__name__)
 _STATION = "PiRate Radio"
 # default grounding for the bare (no-station-config) harness path; production threads real values.
 _DEFAULT_PERSONA = "PiRate Radio DJ"
+_RECENT_TRACKS_MAXLEN = (
+    5  # rolling history grounding patter ("we just played …", §9.2); bounded RAM
+)
 
 
 def build_dj_context(
-    item: ScheduleItem, *, persona: str, station_name: str, station_tagline: str | None
+    item: ScheduleItem,
+    *,
+    persona: str,
+    station_name: str,
+    station_tagline: str | None,
+    recent_tracks: tuple[TrackMeta, ...] = (),
 ) -> DjContext:
     """PURE: ScheduleItem (+ its Track) + station -> the grounded DjContext (R16, §9.2).
 
@@ -69,6 +78,7 @@ def build_dj_context(
         current_block=current,
         next_block=next_block,
         track=track,
+        recent_tracks=recent_tracks,
     )
 
 
@@ -123,6 +133,9 @@ class Producer:
         self._station_name = station_name if station_name else _STATION
         self._station_tagline = station_tagline
         self._target_lufs = loudness_target_lufs
+        # rolling recent-track history (look-ahead-ordered: appended as each TrackItem is rendered,
+        # which is schedule order, so a patter item sees the tracks scheduled before it — §9.2/Q3).
+        self._recent: deque[TrackMeta] = deque(maxlen=_RECENT_TRACKS_MAXLEN)
 
     async def run(self) -> None:
         for item in self._items:
@@ -149,6 +162,10 @@ class Producer:
         # flags reserved for Phase-4 segment assembly, NOT standalone patter, so an intro/outro
         # TrackItem can never replace its song with talk (DA CRITICAL).
         if isinstance(item, TrackItem):
+            t = item.track
+            self._recent.append(
+                TrackMeta(title=t.title, artist=t.artist, album=t.album, year=t.year)
+            )
             return await self._decoder.decode(item.track)
         # Only the three §20-named pure-patter items reach the grounded DJ -> TTS path:
         ctx = build_dj_context(
@@ -156,6 +173,7 @@ class Producer:
             persona=self._persona,
             station_name=self._station_name,
             station_tagline=self._station_tagline,
+            recent_tracks=tuple(self._recent),  # grounding: tracks aired before this patter
         )
         text = await self._dj.patter(ctx.kind, ctx)  # ranked LLM chain; NullDJ floor -> ""
         if not text.strip():  # §9.3 floor: degrade to the Phase-1 template line

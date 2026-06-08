@@ -200,6 +200,19 @@ async def test_pure_patter_routes_dj_text_to_tts(caplog) -> None:
     assert not any("template fallback" in r.message for r in caplog.records)
 
 
+async def test_recent_tracks_grounding_threaded_to_dj() -> None:
+    # P4-4: tracks aired before a patter item appear in its DjContext.recent_tracks (§9.2),
+    # look-ahead-ordered (recorded as each TrackItem is rendered).
+    spy = ScriptedDJ(text="and that was a set")
+    buf = LookAheadBuffer(maxsize=10)
+    items = [_track_item(10.0), _track_item(20.0), _id_item()]
+    await _producer(items, tts=_RecordingTTS(), text_generator=spy, buf=buf).run()
+    assert len(spy.calls) == 1  # only the station_id reached the DJ (tracks decode)
+    _, ctx = spy.calls[0]
+    assert ctx is not None and len(ctx.recent_tracks) == 2  # the two preceding tracks
+    assert all(t.title == "Song" for t in ctx.recent_tracks)  # _track_item's tagged metadata
+
+
 async def test_block_transition_context_threaded_to_dj() -> None:
     # DA: the richest, most-droppable context (next_block + boundary_at) must survive THROUGH the
     # wired producer path, not just at the build_dj_context unit. Capture it via ScriptedDJ.calls.
