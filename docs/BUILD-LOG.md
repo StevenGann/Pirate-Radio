@@ -182,7 +182,7 @@ virtual-time/Sleeper-seam contract (P2) nailed. All committed; resume is lossles
 - **Deferred to Phase 4 (noted, not defects):** `item_kind` redundant Protocol param; raw-exception
   secret-scrub (defense-in-depth); track-tag length cap; worst-case refill budget under outage;
   logging entrypoint; minor coverage-accounting nits.
-### Phase 4 — Multi-station (coordinator/supervisor/systemd/real sink/midnight regen) — PLAN IN REVIEW
+### Phase 4 — Multi-station (coordinator/supervisor/systemd/real sink/midnight regen) — PLAN ADOPTED (building)
 - **Plan Rev 1 drafted** (`docs/plans/phase-4-implementation-plan.md`) + full-seven panel reviewed:
   **5 AYE / 2 NAY → REVISE** (`0033`). Fact Checker verified every seam symbol (no corrections).
 - **Adopt-blocking CRITICALs for Rev 2 (full brief in `0033`):** (C1, DA) the "refill budget"
@@ -195,8 +195,18 @@ virtual-time/Sleeper-seam contract (P2) nailed. All committed; resume is lossles
   +device-retry. **HIGH:** midnight regen-fail isolation + straddle-midnight flow; seek offset-past-
   decoded-frames guard; udev PHYSICAL-PORT-PATH keying; RAM-aware budget; operator log vocabulary +
   StationStatus + first-boot runbook; recent_tracks/item_kind are real churn (correct the framing).
-- **RESUME POINT: author Phase-4 plan Rev 2 folding `0033`, then re-dispatch the full-seven re-vote.**
-  Then build P4-1..P4-9 strict-TDD. (Phase 3 remains COMPLETE + deep-dive-validated.)
+- **Plan Rev 2 ADOPTED 6 AYE / 1 NAY (`0034`).** Folded all of `0033`; the DA's 1-NAY dissent +
+  convergent Senior/Old-Man/RPi conditions folded as amendments: (C2) advance-past-poison keyed on
+  the producer-tagged **item INDEX** (clock-offset drifts, never trips); (RAM) `_ram_bounded_depth`
+  below the worst cluster is a **FAIL-FAST ConfigError** against a **fixed** byte budget (not psutil);
+  (C1) **day-roll prewarm** renders the new day's opening cluster during the outgoing day's final item
+  (only true cold-start hits the bounded one-cluster backstop residual). `StationStatus` adds
+  `airing_backstop` vs `on_air`. Constants set: RAM ≈40% of total 4 GB (no psutil dep), stagger ≈2 s×i.
+- **Increment order:** P4-1 sink → P4-2 udev → P4-3 supervisor+status → P4-4 daily → P4-5 station →
+  P4-5b item_kind removal → P4-6 coordinator+budget → P4-7 midnight → P4-8 systemd+entrypoint →
+  P4-9 housekeeping + Phase-4 deep-dive. Each strict spec-driven TDD (focused-panel TEST review).
+- **RESUME POINT: build P4-1** (`audio/sink.py` `SoundDeviceSink`) tests-first. (Phase 3 COMPLETE +
+  deep-dive-validated; gate 568 tests / 98.56% / ruff+mypy clean.)
 ### Phase 4 — Multi-station (supervisor, systemd)  — NOT STARTED
 ### Phase 5 — Offline tagging tool  — NOT STARTED
 ### Phase 6 — Control API (FastAPI, in v1 per D4)  — NOT STARTED
