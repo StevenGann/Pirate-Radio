@@ -102,9 +102,13 @@ virtual-time/Sleeper-seam contract (P2) nailed. All committed; resume is lossles
   identity; `target_rate<=0` guard) — focused panel QA AYE / DA NAY → adopted; folded DA's
   gameable-stereo (distinct channels) + guard-match fixes. mypy override for pyloudnorm/scipy
   (also clears a P2-1 latent stub error). `0018`. 287 tests, 98.60% cov, resample.py 100%.
-- [ ] P2-3 `audio/decode.py` FfmpegDecoder — **next** · P2-4 typed provider configs +
-  `audio/binaries.py` + preflight wiring (A1) · P2-5 `dj/tts.py` Piper/Espeak · P2-6
-  producer loudness wiring + player format/logging.
+- [x] P2-3 `audio/decode.py` `FfmpegDecoder` (real ffmpeg subprocess via asyncio.to_thread;
+  pure argv/parser/error-map/exc-map; f32le @ station rate; H14 timeout; H12 corrupt→backstop)
+  — focused panel Rev1 2-NAY → Rev2 **3 AYE / 0 NAY**; folded argv+timeout spy (patched real
+  subprocess.run), thread-offload assertion, spaces-in-path, non-UTF-8 stderr, partial-output
+  timeout. `0019`. 314 tests (+1 hardware smoke), 98.68% cov, decode.py 99%.
+- [ ] P2-4 typed provider configs + `audio/binaries.py` + preflight wiring (A1) — **next** ·
+  P2-5 `dj/tts.py` Piper/Espeak · P2-6 producer loudness wiring + player format/logging.
 ### Phase 3 — AI DJ (LLM patter, ranked failover)  — NOT STARTED
 ### Phase 4 — Multi-station (supervisor, systemd)  — NOT STARTED
 ### Phase 5 — Offline tagging tool  — NOT STARTED
