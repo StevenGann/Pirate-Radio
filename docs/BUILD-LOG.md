@@ -98,8 +98,12 @@ virtual-time/Sleeper-seam contract (P2) nailed. All committed; resume is lossles
   immutable) + deps (`pyloudnorm`, `scipy`) + `loudness_target_lufs` `ge=-40,le=0` bound
   (0010 carry-forward resolved) — focused panel **3 AYE / 0 NAY**; folded A2 tolerance 2.5→0.6,
   pad-invariant test, DEBUG-passthrough caplog, new-buffer identity. `0017`. 280 tests, 98.58% cov.
-- [ ] P2-2 `audio/resample.py` — **next** · P2-3 `audio/decode.py` FfmpegDecoder · P2-4 typed provider
-  configs + `audio/binaries.py` + preflight wiring · P2-5 `dj/tts.py` Piper/Espeak · P2-6
+- [x] P2-2 `audio/resample.py` (`to_rate` via scipy `resample_poly`, per-channel; no-op
+  identity; `target_rate<=0` guard) — focused panel QA AYE / DA NAY → adopted; folded DA's
+  gameable-stereo (distinct channels) + guard-match fixes. mypy override for pyloudnorm/scipy
+  (also clears a P2-1 latent stub error). `0018`. 287 tests, 98.60% cov, resample.py 100%.
+- [ ] P2-3 `audio/decode.py` FfmpegDecoder — **next** · P2-4 typed provider configs +
+  `audio/binaries.py` + preflight wiring (A1) · P2-5 `dj/tts.py` Piper/Espeak · P2-6
   producer loudness wiring + player format/logging.
 ### Phase 3 — AI DJ (LLM patter, ranked failover)  — NOT STARTED
 ### Phase 4 — Multi-station (supervisor, systemd)  — NOT STARTED
