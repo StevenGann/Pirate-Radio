@@ -144,9 +144,11 @@ def _resolve_local_zone() -> tzinfo:
             return ZoneInfo(name)
         except (ZoneInfoNotFoundError, ValueError, OSError):
             logger.warning(
-                "System zone name %r could not be loaded as a ZoneInfo; falling back "
-                "to a fixed offset.",
+                "System zone name %r could not be loaded as a ZoneInfo (is the "
+                "'tzdata' package installed?); falling back to a fixed offset — set %s "
+                "to a valid IANA zone name to fix this.",
                 name,
+                _TZ_ENV,
             )
 
     fixed = datetime.now().astimezone().tzinfo

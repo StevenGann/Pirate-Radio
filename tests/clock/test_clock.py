@@ -169,6 +169,8 @@ def test_unloadable_system_name_degrades_to_fixed_offset_with_warning(
         clk = SystemClock()
     assert clk.now().tzinfo is not None
     assert "Fake/Zone" in caplog.text
+    # The WARNING must also point the operator at the remedy, not just name the value.
+    assert "PIRATE_RADIO_TZ" in caplog.text
 
 
 def test_default_uses_resolved_system_name(monkeypatch: pytest.MonkeyPatch) -> None:

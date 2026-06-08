@@ -19,6 +19,19 @@ coordinator/supervisor, no midnight-regeneration loop, and no audio output wired
 
 Live status and the resume point are in [`docs/BUILD-LOG.md`](docs/BUILD-LOG.md).
 
+## Configuration
+
+Secrets and a couple of operational knobs come from the process environment — see
+[`.env.example`](.env.example) for the full list. `config.json` references the credential
+vars by *name* (e.g. `api_key_env`); a referenced var that is unset or empty fails fast at
+startup. Notable optional knob:
+
+- **`PIRATE_RADIO_TZ`** — IANA zone name (e.g. `America/New_York`) overriding the broadcast
+  timezone. Normally unnecessary (the daemon resolves the system zone from `/etc/timezone`
+  or `/etc/localtime`). Set it on a minimal/headless Pi with no zone configured — otherwise
+  the clock degrades to a fixed UTC offset and **DST transitions are not tracked** (the
+  daemon WARNs when this happens and names this variable as the fix).
+
 ## Development
 
 Requires **Python 3.11+**. The runtime targets **64-bit Raspberry Pi OS (arm64)

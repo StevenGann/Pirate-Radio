@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pirate-radio"
 version = "0.0.1"
-description = "Raspberry Pi based pirate radio project (placeholder — design doc pending)"
+description = "Automated multi-station FM radio broadcaster with an optional AI DJ, for Raspberry Pi"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

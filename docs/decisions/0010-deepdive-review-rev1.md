@@ -131,4 +131,35 @@ WARNed, not silent).
   stands as the right mitigation.
 - Gate after Batch-1 remediation: ruff + ruff-format + mypy clean, **195 tests**, 98.08% cov.
 
-Remaining validators to run staggered: Fact Checker + Field Operator.
+## Team validation — Batch 2 (Fact Checker, Field Operator), staggered
+
+Both **CONFIRM**; no new CRITICAL/HIGH. Deep-dive validation now complete across all
+seven agents (Senior Dev, Devil's Advocate, Old Man, QA, RPi, Fact Checker, Field Op).
+
+- **Fact Checker — CONFIRM.** Independently re-verified every quantitative claim against
+  HEAD: 195 tests / 98.08% cov / ruff+mypy clean; `datetime.now()` only in clock.py
+  (config hits are docstrings); no TODO/FIXME/XXX; the DST-bug premise empirically true
+  (`datetime.now().astimezone().tzinfo` → fixed-offset, identical Jan/Jul); `datetime.UTC`
+  valid on 3.11+; `Path.resolve()` symlink behavior as assumed. One LOW: stale
+  `pyproject.toml` description ("design doc pending"). **Remediated.**
+- **Field Operator — CONFIRM**, with an operator-facing MEDIUM the prior passes missed:
+  - **MEDIUM — `PIRATE_RADIO_TZ` undocumented** where an operator would look. The clock
+    WARNING tells the operator to set it, but it appeared nowhere in `.env.example` or
+    `README.md`. **Remediated:** `.env.example` rewritten (real LLM/TTS credential vars +
+    `PIRATE_RADIO_TZ`, dropping the stale `AUDIO_DEVICE`/`LOG_LEVEL` placeholders); README
+    gained a Configuration section documenting it.
+  - **LOW — second-tier clock WARNING** (system name resolves but `ZoneInfo()` can't load
+    it) named the bad value but not the remedy. **Remediated:** message now names
+    `PIRATE_RADIO_TZ` (and hints at the `tzdata` package); the regression test asserts it.
+  - Confirmed: config/grid/persistence error messages name the offending station/file/
+    path/weekday; recovery is non-crash-looping; all three clock fallback tiers log.
+- Gate after Batch-2 remediation: ruff + ruff-format + mypy clean, **195 tests**, 98.08% cov.
+
+## Deep-dive — final disposition
+
+Complete. No CRITICAL or HIGH defects remain. The one HIGH (clock DST freeze) and the
+operator-facing MEDIUM (`PIRATE_RADIO_TZ` discoverability) are fixed; all docstring/doc
+overclaims reconciled. Accepted carry-forwards (tracked, not defects): `loudness_target_lufs`
+range bound → Phase 2; TTS-credential env preflight → Phase 2; design-doc §6/§8.4 text
+corrections → when resume/generator land; single-generation `.bak` (A7, accepted). One LOW
+declined with rationale (numpy `aarch64` marker — would break x86_64 dev/CI).
