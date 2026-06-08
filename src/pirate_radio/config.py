@@ -137,6 +137,9 @@ class LLMConfig(BaseModel):
     model_config = _FROZEN
     providers: tuple[LLMProviderConfig, ...] = Field(min_length=1)
     max_requests_per_minute: int = Field(default=20, gt=0)
+    # H23: per-network-call timeout, threaded by dj/build.py into every LLM backend (uniform
+    # across the ranked chain). A hung call -> ProviderUnavailable -> failover -> floor.
+    request_timeout_seconds: float = Field(default=20.0, gt=0)
 
 
 class StationConfig(BaseModel):
