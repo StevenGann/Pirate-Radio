@@ -205,7 +205,8 @@ virtual-time/Sleeper-seam contract (P2) nailed. All committed; resume is lossles
 - **Increment order:** P4-1 sink → P4-2 udev → P4-3 supervisor+status → P4-4 daily → P4-5 station →
   P4-5b item_kind removal → P4-6 coordinator+budget → P4-7 midnight → P4-8 systemd+entrypoint →
   P4-9 housekeeping + Phase-4 deep-dive. Each strict spec-driven TDD (focused-panel TEST review).
-- **RESUME POINT: build P4-1** (`audio/sink.py` `SoundDeviceSink`) tests-first. (Phase 3 COMPLETE +
+- **P4-1 ✅** `audio/sink.py` `SoundDeviceSink` (persistent gapless stream, dedicated executor, xrun-glitch recovery, lifecycle teardown; R20/R21) — `0035`. Gate: 583 tests, 98.51%, ruff/mypy clean; sink.py 97%. Deps: `sounddevice>=0.4,<1` (+libportaudio2 apt note).
+- **RESUME POINT: build P4-2** (`UdevAudioDeviceResolver` port-path keyed + `docs/ops/udev-audio.md`) tests-first.
   deep-dive-validated; gate 568 tests / 98.56% / ruff+mypy clean.)
 ### Phase 4 — Multi-station (supervisor, systemd)  — NOT STARTED
 ### Phase 5 — Offline tagging tool  — NOT STARTED
