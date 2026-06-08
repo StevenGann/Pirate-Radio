@@ -6,16 +6,21 @@ for the full design (the panel-adopted §21 "Review Resolutions" govern).
 
 ## Status
 
-🚧 **In active construction (Phase 1).** **Not yet a deployable radio** — there is no
-coordinator/supervisor, no midnight-regeneration loop, and no audio output wired yet
-(those land in later phases). What exists today is the validated foundation:
+🚧 **Phases 0 and 1 complete; building toward a deployable radio.** **Not yet a deployable
+radio** — there is no coordinator/supervisor, no midnight-regeneration loop, and no real
+audio output wired yet (those land in later phases). What exists today is the validated,
+fully-tested foundation through the single-station MVP slice:
 
 - **Phase 0 — complete:** config + fail-fast validation, content catalog scanner,
   grid loader + validation, atomic durable JSON state, clock seam, error taxonomy,
   the R10 audio-device-resolution seam.
-- **Phase 1 — in progress:** schedule data models, the `AudioBuffer` type, the
-  provider-error taxonomy, and the DJ/audio Protocol seams + Phase-1 fakes.
-  Remaining: schedule generator, `find_now`/resume, the look-ahead pipeline.
+- **Phase 1 — complete:** schedule data models, the `AudioBuffer` type, the
+  provider-error taxonomy, DJ/audio Protocol seams + fakes, the seeded schedule
+  **generator** (R19), `find_now`/**resume** (R11 gap path + R12 re-anchor), the
+  look-ahead **playback pipeline** (R11 backstop, virtual-time-testable), the writable
+  `state_dir` (A6), and the mtime-cached catalog (A9). Still **not a deployable radio** —
+  the multi-station coordinator/supervisor, midnight regeneration, systemd units, and real
+  audio output land in later phases.
 
 Live status and the resume point are in [`docs/BUILD-LOG.md`](docs/BUILD-LOG.md).
 
@@ -50,7 +55,7 @@ mypy
 pytest -m "not hardware"
 ```
 
-Current gate: ruff + mypy clean, **195 tests**, ~98% coverage.
+Current gate: ruff + mypy clean, **267 tests**, ~98% coverage.
 
 ### Testing philosophy
 
