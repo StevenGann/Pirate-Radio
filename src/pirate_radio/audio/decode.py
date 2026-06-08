@@ -12,6 +12,7 @@ from typing import Protocol, runtime_checkable
 
 from pirate_radio.audio.buffer import DEFAULT_SAMPLE_RATE, AudioBuffer
 from pirate_radio.catalog.models import Track
+from pirate_radio.errors import ProviderError, ProviderUnavailable
 
 
 @runtime_checkable
@@ -33,3 +34,14 @@ class FakeDecoder:
         return AudioBuffer.silence(
             seconds=track.duration, sample_rate=self._sample_rate, channels=self._channels
         )
+
+
+class FailingDecoder:
+    """A decoder that always raises ``ProviderError`` (R15) — drives the pipeline's R11
+    backstop path in tests. Error class configurable (default ``ProviderUnavailable``)."""
+
+    def __init__(self, *, error: ProviderError | None = None) -> None:
+        self._error = error if error is not None else ProviderUnavailable("stub decode failure")
+
+    async def decode(self, track: Track) -> AudioBuffer:
+        raise self._error

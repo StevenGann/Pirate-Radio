@@ -38,8 +38,16 @@ code-quality + documentation review. See memory `overnight-autonomous-build`.
   starts invariant + R11 gap assertion + single-item/patter-first/inclusive-start coverage.
   Wrong-patter-duration & patter-first-drift scoped to Phase 2 (StubTTS is deterministic).
   Applied the deferred §6 design-doc correction (H13). `0012`. 227 tests, 98.39% cov, resume.py 100%.
-- [ ] P1-6 `pipeline/` (P1 no-drop, P2 Sleeper-seam, R21) · P1-7 config state_dir (A6) · P1-8 catalog cache (A9)
-- NOTE: the committed golden-JSON cross-run determinism guard (P5) still pending — fold into P1-6/P1-8.
+- [x] P1-6 `pipeline/` (timing/segment/buffer/producer/player + `run_once`) — look-ahead
+  producer/consumer: P1 no-drop, R11 backstop (producer-substitution + player gap-fill, kept
+  distinct), P2 Sleeper seam + R21 virtual time (zero wall-clock), §10 transition silence.
+  Added `FailingTTS`/`FailingDecoder` fakes. Focused 3-panel Rev1 3-NAY → Rev2 **3 AYE / 0 NAY**
+  (DA caught the `AudioBuffer ==`→ValueError; QA/Senior caught the P1 "don't drop slow item"
+  contradiction). `0013`. 250 tests, 98.54% cov, pipeline ~100%.
+- [ ] P1-7 config state_dir (A6) · P1-8 catalog cache (A9) — **next.**
+- NOTE: the committed golden-JSON cross-run determinism guard (P5) still pending — fold into P1-8.
+- NOTE: `run_once` is the producer+player harness over pre-selected items; the
+  `DailySchedule → find_now → run_once` daily slice is the Phase-4 coordinator's job.
 - [ ] P1-6 `pipeline/` (P1 no-drop, P2 Sleeper-seam, R21) · P1-7 config state_dir (A6) · P1-8 catalog cache (A9)
 
 #### Resume handoff (paused mid-Phase-1)

@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 
 from pirate_radio.audio.buffer import DEFAULT_SAMPLE_RATE, AudioBuffer
+from pirate_radio.errors import ProviderError, ProviderUnavailable
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,19 @@ class StubTTS:
         return AudioBuffer.silence(
             seconds=seconds, sample_rate=self._sample_rate, channels=self._channels
         )
+
+
+class FailingTTS:
+    """A TTS engine that always raises ``ProviderError`` (R15) — drives the pipeline's
+    R11 backstop path in tests. The error class is configurable so a test can exercise
+    both the retryable (``ProviderUnavailable``, default) and terminal (``ProviderFatal``)
+    branches and prove the pipeline catches the *base* ``ProviderError``, not one leaf."""
+
+    def __init__(self, *, error: ProviderError | None = None) -> None:
+        self._error = error if error is not None else ProviderUnavailable("stub TTS failure")
+
+    async def synthesize(self, text: str) -> AudioBuffer:
+        raise self._error
 
 
 class FakeAudioSink:
