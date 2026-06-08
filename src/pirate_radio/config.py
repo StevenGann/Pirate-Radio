@@ -3,7 +3,8 @@
 Discriminated unions keyed on ``backend`` (R16) make a typo'd provider param fail at
 load, not mid-broadcast. All §12 checks run at load: unique station names, audio
 devices that resolve to distinct stable PortIds (R10/A2), exactly one of
-dj_personality/_file, every *_env present AND non-empty (A1), schedule_dir/content_dir
+dj_personality/_file, every LLM ``api_key_env`` present AND non-empty (A1; TTS
+credential preflight is a Phase-2 carry-forward), schedule_dir/content_dir
 exist with >= 1 valid grid / >= 1 non-empty group, and known tts_providers backend
 keys (A3). The weekday for grid resolution comes from an injected ``Clock`` (A4), so
 ``clock.py`` stays the only ``datetime.now()`` site.
@@ -203,8 +204,13 @@ def _check_audio_devices(config: DaemonConfig, resolver: AudioDeviceResolver) ->
 
 
 def _check_env_vars_present(config: DaemonConfig) -> None:
-    """Every referenced *_env var must be present AND non-empty in the environment
-    (§12, A1: a blank value is a failed EnvironmentFile/SOPS, not a valid secret)."""
+    """Validate LLM provider ``api_key_env`` vars are present AND non-empty (§12, A1:
+    a blank value is a failed EnvironmentFile/SOPS, not a valid secret).
+
+    Scope note: this currently covers **LLM** credentials only. ``tts_providers``
+    credentials are NOT checked here yet — a station using a cloud TTS backend boots
+    clean and would only fail at first synth. The TTS-credential preflight lands in
+    Phase 2 when a TTS engine actually reads those vars (carry-forward, 0010)."""
     needed: set[str] = set()
     chains = [config.llm.providers]
     chains += [s.llm.providers for s in config.stations if s.llm is not None]

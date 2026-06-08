@@ -12,9 +12,22 @@ datetimes in the same zone the clock reports.
 
 from __future__ import annotations
 
-from datetime import datetime, tzinfo
+import logging
+import os
+from datetime import UTC, datetime, tzinfo
+from pathlib import Path
 from typing import Protocol, runtime_checkable
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+logger = logging.getLogger(__name__)
+
+#: Operator override for the broadcast zone (Q5). An IANA name, e.g. "America/New_York".
+_TZ_ENV = "PIRATE_RADIO_TZ"
+#: System zone sources, read in order. Module constants so tests can redirect the seam.
+_ETC_TIMEZONE = Path("/etc/timezone")
+_ETC_LOCALTIME = Path("/etc/localtime")
+#: Marker dividing the zoneinfo database root from the IANA name in a localtime symlink.
+_ZONEINFO_MARKER = "zoneinfo/"
 
 
 @runtime_checkable
@@ -79,14 +92,70 @@ class FixedClock:
         return FixedClock(instant)
 
 
-def _resolve_local_zone() -> tzinfo:
-    """Resolve the system local zone, falling back to UTC.
+def _system_zone_name() -> str | None:
+    """Resolve the system's IANA zone *name* (e.g. ``"America/New_York"``), or None.
 
-    ``datetime.now().astimezone()`` attaches the OS-configured local zone; we
-    extract a concrete ``tzinfo`` from it so ``SystemClock.tz()`` is stable for the
-    process.
+    Reads ``/etc/timezone`` first (Debian/Raspberry Pi OS write the plain name
+    there); otherwise inspects the ``/etc/localtime`` symlink and extracts the name
+    after the ``zoneinfo/`` segment of its target. Returns ``None`` when neither
+    yields a usable name — the caller then degrades to a fixed offset.
     """
-    local = datetime.now().astimezone().tzinfo
-    if local is None:  # pragma: no cover - astimezone always attaches a zone
-        return ZoneInfo("UTC")
-    return local
+    try:
+        if _ETC_TIMEZONE.is_file():
+            name = _ETC_TIMEZONE.read_text(encoding="utf-8").strip()
+            if name:
+                return name
+    except OSError:  # pragma: no cover - unreadable /etc/timezone is rare
+        pass
+    try:
+        if _ETC_LOCALTIME.is_symlink():
+            target = str(_ETC_LOCALTIME.resolve())
+            if _ZONEINFO_MARKER in target:
+                return target.split(_ZONEINFO_MARKER, 1)[1]
+    except OSError:  # pragma: no cover - broken symlink / unreadable
+        pass
+    return None
+
+
+def _resolve_local_zone() -> tzinfo:
+    """Resolve a DST-aware local zone (R9/D6), honoring the ``PIRATE_RADIO_TZ`` override.
+
+    Order: the ``PIRATE_RADIO_TZ`` env override (Q5), then the system IANA zone name
+    (``/etc/timezone`` / ``/etc/localtime``) loaded as a ``ZoneInfo`` so ``zoneinfo``
+    owns DST. A fixed-offset ``tzinfo`` is only a last resort (logged) — captured
+    once, it cannot follow DST, so the warning makes that degradation visible rather
+    than letting a long-lived clock silently drift an hour across a transition.
+    """
+    env = os.environ.get(_TZ_ENV)
+    if env:
+        try:
+            return ZoneInfo(env)
+        except (ZoneInfoNotFoundError, ValueError, OSError):
+            logger.warning(
+                "%s=%r is not a loadable IANA zone; ignoring it and resolving the "
+                "system zone instead.",
+                _TZ_ENV,
+                env,
+            )
+
+    name = _system_zone_name()
+    if name is not None:
+        try:
+            return ZoneInfo(name)
+        except (ZoneInfoNotFoundError, ValueError, OSError):
+            logger.warning(
+                "System zone name %r could not be loaded as a ZoneInfo; falling back "
+                "to a fixed offset.",
+                name,
+            )
+
+    fixed = datetime.now().astimezone().tzinfo
+    logger.warning(
+        "No IANA timezone could be resolved; using fixed offset %s. DST transitions "
+        "will NOT be tracked — set %s to an IANA zone name to fix this.",
+        fixed,
+        _TZ_ENV,
+    )
+    if fixed is None:  # pragma: no cover - astimezone always attaches a zone
+        return UTC
+    return fixed

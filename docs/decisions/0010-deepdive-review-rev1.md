@@ -61,7 +61,47 @@ process/strict-tdd, agent notes). 186 tests, 98.25% coverage, ruff+mypy clean.
 3. Logged the two carry-forward items (`loudness_target_lufs` bound → Phase 2;
    design-doc §6/§8.4 corrections → when resume/generator land).
 
-## Pending
-Full seven-agent validation of this report once the provider throttle clears
-(re-dispatch staggered, 2–3 at a time). No CRITICAL/HIGH *code* issue blocks
-resuming construction at P1-4.
+## Team validation (after the throttle cleared)
+
+- **Senior Dev — CONFIRM.** Independently re-read persistence/config/grid/models/
+  scanner; agreed no CRITICAL/HIGH; README rewrite accurate. Noted two impl wins the
+  manager pass undersold (the `next_block_starts_at` tz validator; the A2 dict→PortId
+  migration).
+- **Devil's Advocate — DISPUTE, found a HIGH the manager pass missed:**
+  - **HIGH — `clock.py` `_resolve_local_zone()` freezes a fixed UTC offset →
+    DST-broken.** `datetime.now().astimezone().tzinfo` returns a fixed-offset
+    `timezone` (verified: identical Jan/Jul offset), not a DST-aware `ZoneInfo`.
+    Captured once at construction, a long-lived `SystemClock()` drifts an hour across
+    a DST transition — contradicting the module's own "zoneinfo owns DST" docstring,
+    R9, and D6. Latent in Phase 1 (no daemon yet) but it's foundation clock code with
+    the DST contract in its own docstring → HIGH. **Being remediated now (bug-fix
+    TDD):** `_resolve_local_zone` honors `PIRATE_RADIO_TZ` (Q5) then resolves the
+    system IANA zone (`/etc/timezone` / `/etc/localtime`) → `ZoneInfo`; fixed-offset
+    only as a logged last resort. Regression tests added to `tests/clock/`.
+  - **MEDIUM — `config._check_env_vars_present` only checks LLM `api_key_env`,** not
+    `tts_providers` credentials, so an ElevenLabs station boots clean and fails at
+    first synth; the docstring's "every referenced *_env" overclaims. Soften the
+    docstring now; the real tts-credential env check lands in Phase 2 when a TTS
+    engine reads them. *(Carry-forward.)*
+  - LOW — single-generation `.bak` (already documented/accepted, A7).
+
+**Net:** the deep-dive's value was the DST HIGH — exactly what manager-led review
+missed and team validation caught. Remediation in progress; remaining validators
+(Old Man, QA, RPi, Fact Checker, Field Op) to run staggered.
+
+## Remediation (bug-fix TDD, completed)
+
+- **HIGH clock DST — FIXED.** Strict-TDD bug fix: 8 regression tests authored from
+  spec → confirmed RED → adopted (3-0, focused panel) → implemented GREEN.
+  `clock._resolve_local_zone()` now honors `PIRATE_RADIO_TZ` (Q5) → resolves the
+  system IANA name via `_system_zone_name()` (`/etc/timezone`, then the
+  `/etc/localtime` symlink's `zoneinfo/<name>` tail) → `ZoneInfo`; a fixed offset is
+  only a logged last resort. Tests pin: env override is DST-aware (Jan≠Jul offset),
+  default path returns a real `ZoneInfo` (not `datetime.timezone`), bad env WARNs and
+  degrades without raising, unresolvable host degrades with a WARNING, and the
+  `_ETC_TIMEZONE`/`_ETC_LOCALTIME` parsing seam (file / symlink / unresolvable→None).
+- **MEDIUM tts_providers-env overclaim — FIXED (docstring).** `config` module +
+  `_check_env_vars_present` docstrings now state the check covers LLM `api_key_env`
+  only; the TTS-credential preflight is an explicit Phase-2 carry-forward. (The real
+  check still lands in Phase 2 when a TTS engine reads those vars.)
+- Gate after remediation: ruff + ruff-format + mypy clean, **194 tests**, 97.81% cov.

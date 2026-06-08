@@ -199,3 +199,43 @@
   as optional extra + lazy import so CI never loads PortAudio; transition_silence
   kept OUT of duration so the exact-track re-anchor stays exact; deferring real
   ffmpeg decode to Phase 2 (paired with loudness per R22) is correctly reasoned.
+
+- _2026-06-08_ — **Deep-dive audit of shipped src/.** Manager-led pass claimed "no
+  CRITICAL/HIGH." DISPUTE — found one HIGH the pass missed:
+
+  **HIGH — `SystemClock` default freezes a fixed UTC offset; DST guarantee is
+  violated.** `clock.py:89` `_resolve_local_zone()` returns
+  `datetime.now().astimezone().tzinfo`, which is a fixed-offset `datetime.timezone`
+  (verified: `datetime.timezone(timedelta(-1,61200),'PDT')`), NOT a `ZoneInfo`. So a
+  default-constructed `SystemClock()` — the production path — captures the offset at
+  construction and never honors a DST transition. This directly contradicts the
+  module's own docstring ("datetimes are always tz-aware so zoneinfo owns DST"),
+  R9, and D6. A 24/7 daemon started in PST keeps the winter offset through summer →
+  after the DST change `clock.now()` is off by one hour → `find_now` seeks the wrong
+  schedule slot → the entire day's airtime is shifted an hour for ~half the year.
+  Latent now only because Phase 1 ships no long-lived daemon, but it's foundation
+  code with the contract baked into its own docstring. Fix: resolve the real IANA
+  zone — `ZoneInfo(<key from /etc/localtime or $TZ or `tzlocal`>)` — or accept a
+  `PIRATE_RADIO_TZ` env override (already floated as Q5) and store a `ZoneInfo`, not
+  a frozen offset. Add a test that crosses a DST boundary (two `now()` at instants
+  on either side of the fold/gap have different `utcoffset()`).
+
+  MEDIUM — TTS API-key env vars are never presence-checked.
+  `config.py:_check_env_vars_present` only scans LLM providers' `api_key_env`
+  (line ~213); ElevenLabs credentials live in `tts_providers` (a `dict[str,dict]`
+  whose inner keys are explicitly "Phase 2"), and the station `tts` configs carry no
+  `api_key_env` field. So §12's "every referenced *_env present" is not honored for
+  TTS — an ElevenLabs station boots clean and dies on first synth. Doc overclaims vs
+  code. Fix when ElevenLabs lands in Phase 2/3.
+
+  LOW — single-generation `.bak`: a successful write of valid-but-wrong data rotates
+  the last good copy to `.bak` then the next write overwrites `.bak` — two bad writes
+  lose all good history. Documented as accepted; note only.
+
+  Confirmed NOT bugs (manager pass was right on these): grid tiling Q3 fence is
+  correct (non-final midnight + zero-length rejected); discriminated unions +
+  extra="forbid" sound; AudioBuffer now has the `channels>=1` guard (earlier gap
+  closed); `_parse_year` 1..9999 matches `Track.year` ge=1 le=9999 (A10 honored);
+  persistence parent-dir fsync present; ConfigError raised inside model_validator
+  propagates (Pydantic only wraps ValueError/AssertionError) and is caught by
+  load_config's `except ConfigError` — fragile but correct.
