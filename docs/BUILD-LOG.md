@@ -28,7 +28,13 @@ code-quality + documentation review. See memory `overnight-autonomous-build`.
 - [x] P1-1 `schedule/models.py` (ScheduleItem union + DailySchedule, R17) — focused 3-0 (QA/SeniorDev/DA); folded next_block_starts_at tz, variant-frozen, missing-fields, TrackItem-stray-field. +`--import-mode=importlib`. 155 tests, 98.63% cov.
 - [x] P1-2 errors-R15 (ProviderError taxonomy) + `audio/buffer.py` (AudioBuffer R14, DEFAULT_SAMPLE_RATE H5) — focused 3-0; folded channels>=1, fractional-rounding, zero-seconds. numpy dep. 170 tests, 98.73%.
 - [x] P1-3 dj/protocols+fakes (TextGenerator/TTSEngine/AudioSink + NullDJ/StubTTS/FakeAudioSink) + audio/decode (Decoder/FakeDecoder) — 2-1 (DA NAY on coverage-gaming, fixed: parametrized exact-duration + non-trivial wpm + silent assert). pytest-asyncio. 186 tests, 98.25%. (FailingTTS/FailingDecoder + SoundDeviceSink → later increments)
-- [ ] P1-4 `schedule/generator.py` (R19, P3 boundary, H1) · P1-5 `schedule/resume.py` (find_now R11/R12, P6, H4)
+- [x] P1-4 `schedule/generator.py` (§8.4 fill, R19 seedable, P3 midnight roll, H1 constants,
+  H2 soft repeat, H3 typed `ScheduleError`) — focused 3-panel: Rev1 3-NAY → Rev2 **2 AYE / 1
+  NAY → adopted**; DA's two post-adoption blockers (false overflow assertion → guaranteed
+  residual-gap invariant; loose transition-duration bound → drift relationship) both folded in.
+  `0011`. 211 tests, 98.29% cov, generator.py 100%.
+- [ ] P1-5 `schedule/resume.py` (find_now R11/R12, P6, H4) — **next.** Lands the committed
+  golden-JSON cross-run determinism guard (P5) alongside resume.
 - [ ] P1-6 `pipeline/` (P1 no-drop, P2 Sleeper-seam, R21) · P1-7 config state_dir (A6) · P1-8 catalog cache (A9)
 
 #### Resume handoff (paused mid-Phase-1)

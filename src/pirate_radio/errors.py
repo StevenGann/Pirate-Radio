@@ -38,6 +38,13 @@ class CatalogError(PirateRadioError):
     """The content directory cannot be scanned (missing root, no groups, etc.)."""
 
 
+class ScheduleError(PirateRadioError):
+    """Schedule generation cannot proceed (§8.4) — e.g. a grid slot references a group
+    with no pool in the catalog. Defense-in-depth: config-load validation
+    (``validate_grid_against_catalog``) normally catches this first, but the generator
+    raises this typed error rather than a bare ``KeyError`` if it ever slips through."""
+
+
 class StateCorruptionError(PirateRadioError):
     """Persisted state and its .bak are both unreadable/invalid (R6 last resort).
 
