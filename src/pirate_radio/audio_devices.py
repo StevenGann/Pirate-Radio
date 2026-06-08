@@ -11,6 +11,8 @@ name->PortId mapping. Phase 0 ships only the Protocol + the static fake.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import NewType, Protocol, runtime_checkable
 
 # A stable physical device identity (e.g. a udev-assigned ALSA card id keyed on the
@@ -43,7 +45,78 @@ class StaticAudioDeviceResolver:
         return self._by_name.get(name)
 
 
-# The real UdevAudioDeviceResolver (reads udev/ALSA, bridges PortAudio name ->
-# hw:CARD=) is deferred to Phase 4 multi-station bring-up, where it can be tested on
-# real dongles behind @pytest.mark.hardware. It belongs here so config.py's import
-# target never changes.
+@dataclass(frozen=True)
+class AudioDevice:
+    """One enumerated output device — the POST-ENUMERATION joined record spanning both
+    namespaces: ``name`` (the ALSA card id the operator puts in ``config.audio_device``,
+    udev-assigned per the recipe), ``port_path`` (the stable physical USB port path — the
+    ``PortId`` key, survives reboots), and ``index`` (the PortAudio device index the sink opens).
+    ``serial`` is recorded but NEVER used for keying (CM10x dongles share/empty serials, R10)."""
+
+    name: str
+    port_path: str
+    index: int
+    serial: str | None = None
+
+
+class UdevAudioDeviceResolver:
+    """Real R10 resolver: configured name -> stable ``PortId`` **keyed on the physical USB port
+    path** (NOT serial — identical/empty CM10x serials would alias distinct transmitters). Also
+    bridges name -> the PortAudio device index for the sink. The udev/ALSA + sysfs enumeration is
+    the ONLY hardware line; the name->port_path / name->index mapping over the enumerated records
+    is PURE (the enumeration is injectable for tests)."""
+
+    def __init__(self, *, enumerate_devices: Callable[[], list[AudioDevice]] | None = None) -> None:
+        self._enumerate = enumerate_devices or self._enumerate_hardware
+
+    def _unique(self, name: str) -> AudioDevice | None:
+        """The single device for ``name``, or None if absent OR ambiguous (one ALSA name mapping
+        to >1 distinct physical port — a misconfigured udev rule). None makes config validation
+        reject it rather than silently picking the wrong transmitter."""
+        matches = [d for d in self._enumerate() if d.name == name]
+        ports = {d.port_path for d in matches}
+        if len(ports) != 1:  # 0 = absent, >1 = ambiguous
+            return None
+        return matches[0]
+
+    def resolve(self, name: str) -> PortId | None:
+        device = self._unique(name)
+        return PortId(device.port_path) if device is not None else None
+
+    def device_index(self, name: str) -> int | None:
+        """The PortAudio device index for ``name`` (for the sink). None exactly when ``resolve``
+        is None, so the sink never gets an index for a name that didn't resolve (and vice versa)."""
+        device = self._unique(name)
+        return device.index if device is not None else None
+
+    def _enumerate_hardware(self) -> list[AudioDevice]:  # pragma: no cover (R20: hardware only)
+        # Lazy (R21): never imported on the CI path. Enumerate PortAudio output devices, parse the
+        # ALSA card id from each, and derive the stable physical port path from sysfs
+        # (/sys/class/sound/<card>/device -> the USB ID_PATH). The udev recipe (docs/ops) assigns
+        # each dongle a stable ALSA card id keyed on its physical port. Validated by the
+        # @pytest.mark.hardware enumeration smoke on a real box.
+        import re
+        from pathlib import Path
+
+        import sounddevice as sd
+
+        devices: list[AudioDevice] = []
+        for index, info in enumerate(sd.query_devices()):
+            if info.get("max_output_channels", 0) < 1:
+                continue
+            pa_name = str(info["name"])
+            card = pa_name.split(":", 1)[0].strip()  # "pirate1: USB Audio (hw:2,0)" -> "pirate1"
+            m = re.search(r"hw:(\d+)", pa_name)  # also grab the ALSA card number for the sysfs walk
+            card_no = m.group(1) if m else None
+            port_path: str | None = None
+            for candidate in (f"card{card_no}" if card_no else None, card):
+                if not candidate:
+                    continue
+                dev = Path(f"/sys/class/sound/{candidate}/device")
+                if dev.exists():
+                    port_path = dev.resolve().name  # the stable USB port-path leaf
+                    break
+            if port_path is None:
+                continue
+            devices.append(AudioDevice(name=card, port_path=port_path, index=index))
+        return devices
