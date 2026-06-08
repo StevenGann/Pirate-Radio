@@ -53,6 +53,27 @@
 
 ## Notes log
 
+- _2026-06-07_ — Phase 0 implementation-plan review. Plan faithfully implements
+  R5/R6/R17 (atomic persistence + schema_version envelope), R16 discriminated
+  unions (TTS+LLM keyed on `backend`, `extra="forbid"`), R18/D6 (injectable
+  tz-aware Clock), and R10 (AudioDeviceResolver seam — policy tested in CI,
+  udev mechanism deferred to Phase 4). Strong choices: frozen models +
+  tuple/frozenset collections, two-phase grid validation, real-mutagen-on-real
+  -WAV fixtures over mocks, `yaml.safe_load` only.
+  - **R16 carve-out is the one real regression:** `tts_providers: dict[str,
+    dict]` sits in `DaemonConfig` (model layer) NOW, and `extra="forbid"` does
+    not recurse into dict values — a typo'd credential key passes silently, the
+    exact failure R16 exists to stop. Defensible only because it has no Phase-0
+    reader; must be modeled when Phase 2 reads it. Not a blocker (narrow, flagged
+    openly as plan Q6).
+  - **Convention leak:** `load_config` default path calls
+    `datetime.now().weekday()` directly — a second `datetime.now()` outside
+    `clock.py`, against the plan's own §5 rule. Prefer taking a `Clock`. Minor.
+  - **Catalog (Q1):** value object correct; smell is `groups()` recomputing O(n)
+    per call — cache a group index at construction, keep frozen.
+  - **Grids (Q2):** validate ALL present grid files at boot vs current catalog.
+  - **24:00 (Q3):** `time(0,0)` OK for Phase 0 if all-day + wrap cases tested;
+    minutes-from-midnight cleaner long-term. Won't block.
 - _2026-06-07_ — Panel established. Awaiting design document. No architecture
   decisions made yet.
 - _2026-06-07_ — Round 1 review of PiRate_Radio_Design_Doc.md. Strong overall

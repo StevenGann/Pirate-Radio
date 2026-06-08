@@ -89,3 +89,43 @@
     for the full 4-station + AI-DJ vision. Cloud LLM + local Piper is feasible there.
     Local-LLM-on-Pi for 4 stations is NOT realistically real-time. Pi Zero/Zero 2 W
     is a non-starter for even one station with neural TTS.
+
+- _2026-06-07_ — **Rev 2 client decisions update.** D1: target relaxed to Pi 5
+  4GB, baseline Pi 4 4GB, must run acceptably on Pi 3 (1GB/4×A53). D2: the
+  "local" LLM is a NETWORKED Ollama server on the LAN, NOT on-Pi inference — my
+  on-Pi LLM RAM/tok-s BLOCKER is moot; on-Pi compute is now just ffmpeg + loudness
+  + Piper TTS ×N. F1 stations-per-model guideline I gave: Pi 3 = 1 station (RAM
+  wall: OS + 4 Piper models + 4 buffers spills to SD swap; A53 cores saturate on
+  synchronized bursts); Pi 4 4GB = 4-station baseline w/ medium voices + staggered
+  patter + active cooling; Pi 5 4GB = comfortable 4 stations, recommended target.
+
+- _2026-06-07_ — **Phase 0 implementation plan review (RPi lens).** Phase 0 is
+  pure logic (config/catalog/grid/persistence), no audio/RF, so most Pi risk is
+  Phase 1+. Durable Pi-specific findings on the plan:
+  - **R10 seam (audio_devices.py) is well-designed for testability** (Protocol +
+    StaticAudioDeviceResolver fake, real UdevAudioDeviceResolver deferred to Phase
+    4 behind @pytest.mark.hardware). BUT the contract is underspecified: the plan
+    never pins WHAT a "stable name" is. ALSA card names (snd-usb-audio id=) are
+    assignable via udev ATTR{id} keyed on KERNEL/physical port path, NOT by USB
+    serial — cheap CM108/CM109 dongles share identical or absent serials, so
+    serial-based udev rules collide. Must key on the physical port path. Also:
+    sounddevice/PortAudio enumerate by PortAudio name, which is NOT the ALSA card
+    id — the resolver must bridge PortAudio name -> ALSA hw:CARD=. Flag for Phase 4.
+  - **Catalog full eager scan at startup (Open Q1) is a real Pi concern.** Flat
+    tuple[Track,...] read via mutagen on every file. On Pi 3/4 with an SD-resident
+    library of thousands of tracks, cold scan is slow (poor SD random-read IOPS);
+    4 stations × full rescan at boot = noticeable startup latency. RAM is fine
+    (Track ~hundreds of bytes). Result is persistable -> recommend Phase 1 cache +
+    mtime-based rescan. Phase 0 eager is acceptable; flag latency, not a blocker.
+  - **Atomic-write fsync cost on SD (persistence.py R5):** 2 fsyncs/write; cheap
+    SD fsync = 10–100ms+ each. Phase 0 writes catalog cache only (infrequent), fine.
+    Phase 1 per-item resume state ×4 stations would multiply this -> recommend
+    batch/debounce and/or tmpfs+periodic flush in Phase 1. Flag forward.
+  - **No Pi-hostile assumptions in Phase 0.** Python 3.11 / Bookworm OK; PyYAML
+    safe_load, mutagen, pydantic all pure-Python or have ARM wheels. zoneinfo uses
+    Bookworm system tzdata at /usr/share/zoneinfo (no pip tzdata needed); fine.
+  - **D6 local-zone resolution** via datetime.now().astimezone().tzinfo: headless
+    Pi with no RTC can have a wrong clock at boot until NTP syncs — D6 says trust
+    OS, and only the zone (not instant) is resolved here, so OK. Host should have
+    NTP + correct /etc/timezone. The PIRATE_RADIO_TZ override floated in Open Q5 is
+    worth adopting for deterministic deployments.

@@ -47,6 +47,14 @@
 | Ollama endpoint http://localhost:11434, model `llama3.1` | **verified** | Ollama docs (default :11434; `/api/chat` + OpenAI-compat `/v1`); llama3.1 valid tag | 2026-06-07 |
 | ElevenLabs TTS params voice_id / stability / similarity_boost | **verified** | elevenlabs.io API docs (voice settings: stability, similarity_boost 0–1) | 2026-06-07 |
 | Anthropic "current model id" (doc uses placeholder) | **verified (placeholder is correct)** | Current ids as of 2026-06: `claude-opus-4-8` (Opus 4.8, May 2026), `claude-sonnet-4-6`. Doc's `<set to a current model id>` placeholder is the right call. | 2026-06-07 |
+| Rev2 D1: Pi 3 = 1 GB RAM, 4× Cortex-A53 @ 1.2 GHz; Pi 5 official PSU = 27 W USB-C PD (5.1V/5A) | **verified** | Raspberry Pi 3B spec; datasheets.raspberrypi.com 27W USB-C product brief | 2026-06-07 |
+| Rev2 R2/D2: llama3.1 8B Q4 ~5–6 GB RAM, ~2–5 tok/s CPU on Pi 5 (now MOOT — Ollama reframed as LAN server, not on-Pi) | **verified-but-moot** | Stratosphere/llama.cpp Pi 5 benchmarks; D2 moots on-Pi figures | 2026-06-07 |
+| **Phase-0 plan** — Pydantic v2 discriminated union `Annotated[Union[...], Field(discriminator="backend")]` + `ConfigDict(frozen=True, extra="forbid")` | **verified** | pydantic.dev Unions/Fields docs — exact syntax | 2026-06-07 |
+| Phase-0 — `mutagen.File()` returns None for unrecognized files; defensive `.info`/`.info.length`/`.tags`-may-be-None access | **verified** | mutagen.readthedocs.io base module | 2026-06-07 |
+| Phase-0 — mutagen reads stdlib-`wave`-generated WAV `.info.length` | **verified** | WAV in mutagen supported formats (mutagen.wave.WAVE) | 2026-06-07 |
+| Phase-0 — `os.replace()` atomic same-fs; temp→fsync→replace→dir-fsync durability incl. directory-fsync necessity | **verified** | Python os docs / cpython issue 8828 / python-atomicwrites | 2026-06-07 |
+| Phase-0 — `yaml.safe_load` rejects `!!python/object/apply` via ConstructorError (subclass of yaml.YAMLError) | **verified** | PyYAML docs + CVE writeups | 2026-06-07 |
+| Phase-0 — `zoneinfo` + `datetime.now().astimezone().tzinfo` resolves system local zone; tz-aware datetimes | **verified** | Python datetime/zoneinfo docs | 2026-06-07 |
 
 ## Notes log
 
@@ -66,3 +74,19 @@
   but flag it. The doc's Anthropic-model placeholder is the correct pattern;
   current id is `claude-opus-4-8`/`claude-sonnet-4-6`. Net: the doc is
   factually sound; nothing in it would force a design change.
+- _2026-06-07_ — Phase-0 implementation-plan fact check (code-level). Verified
+  every load-bearing API against current docs: Pydantic v2 discriminated-union
+  syntax (`Annotated[Union, Field(discriminator=...)]`, `frozen=True`,
+  `extra="forbid"`), mutagen `File()`/`.info.length`/`.tags` None-handling
+  (incl. WAV support for stdlib-`wave` fixtures), `os.replace` same-fs atomicity
+  + the temp→fsync→replace→dir-fsync durability pattern (directory fsync IS
+  necessary for the rename to survive power loss — plan's `_fsync_dir` is
+  correct), `yaml.safe_load` blocking `!!python` tags via ConstructorError
+  (so the security test passes through the `except yaml.YAMLError` path), and
+  `zoneinfo`/`astimezone()` local-zone resolution. No snippet found that would
+  fail to run. Two non-fatal notes for other reviewers (not factual errors):
+  (1) `frozen=True` on `DaemonConfig` does NOT freeze the inner
+  `tts_providers: dict[str,dict]` contents — immutability is shallow; the plan
+  already flags this as typing debt. (2) The persisted DeepSeek `model` value is
+  a free string (good — no hardcoded `deepseek-chat`), consistent with the
+  earlier R13 correction. Plan is factually sound to implement.

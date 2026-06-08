@@ -90,6 +90,27 @@ flagging it so the deployer makes an informed choice.
 - _2026-06-07_ — Panel established. Awaiting design doc. My first three flags for
   whenever it lands: power-loss safety, SD-write budget, and the legality of the
   transmission mode.
+- _2026-06-07_ — Phase 0 implementation plan review (`docs/plans/phase-0-implementation-plan.md`,
+  1613 lines). Verdict: the atomic-write/recovery core is genuinely sound for
+  power-loss — `atomic_write_json` does temp→fsync→`os.replace`→parent-dir-fsync
+  (§4.3), `load_with_recovery` validates→falls to `.bak`→raises
+  `StateCorruptionError(path=)` (no crash-loop), and the both-bad case is handled
+  AND tested (test_raises_when_both_corrupt, ~line 1257). That's R5/R6 done right.
+  Field gaps I'm raising: (1) **`_check_env_vars_present` (lines 1059-1071) tests
+  only `n not in os.environ` — an EMPTY `API_KEY=""` passes validation**, then the
+  daemon fails at first cloud call hours later. Empty/whitespace must count as
+  missing. (2) **No state-dir location convention** — `persistence.py` writes
+  wherever the caller points; nothing keeps state/cache off the wear-sensitive
+  OS/SD partition (R8′ intent). Phase 0 should pin a configurable state path
+  defaulting off-card. (3) **D6 boot-clock gotcha**: `load_config` calls
+  `datetime.now().weekday()` (line 1017) to pick today's grid; on a headless Pi
+  with no RTC, NTP may not have synced at boot → wrong weekday → wrong grid for
+  hours. Injectable `clock_weekday` exists but production passes None → naive
+  now(). Need systemd `After=time-sync.target` (Phase 1) + document the risk now.
+  (4) **Write amplification**: `_replace_keep_bak` reads full live file then both
+  files do tmp+replace+dir-fsync ≈ 4 physical writes per save; fine for once-a-day
+  schedules, must never sit on a per-track/per-patter path (SD wear). Constraint
+  recorded. (5) Error messages are operator-actionable and secret-free (good).
 - _2026-06-07_ — Round 1 review of `PiRate_Radio_Design_Doc.md`. Read full doc.
   Headline field gaps: (a) §14 flat-JSON persistence specifies NO atomic-write or
   durability discipline — brownout mid-write of the generated daily schedule

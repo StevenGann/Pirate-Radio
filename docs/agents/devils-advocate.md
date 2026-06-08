@@ -113,3 +113,46 @@
   config + grid validation (§8.3/§12) is exactly right; secrets-via-env (§12) is
   correct; offline tagging tool kept out of runtime (§7) correctly respects the
   MusicBrainz 1 req/s limit.
+
+- _2026-06-07_ — **Phase 0 Implementation Plan Round 1.** Code-level review; real
+  bugs in the drafted code, not taste.
+
+  1. **Empty-but-present env var passes the §12 fail-fast check.**
+     `_check_env_vars_present` (~line 1069) uses `n not in os.environ`. An env var
+     exported as `""` (the classic "secret didn't load from SOPS/EnvironmentFile")
+     IS in `os.environ`, so config validates and the daemon boots with an empty
+     API key — failure resurfaces on the first cloud call, defeating "fail at
+     startup, not at 3 a.m." Fix: reject empty/whitespace, not just absent keys.
+
+  2. **R10 device-distinctness is checked on config *strings*, not resolved
+     physical identities — so the plan does not actually deliver R10.** Both
+     `_check_distinct_audio_devices` and `_check_audio_devices_resolve` work on the
+     raw `audio_device` string. R10 exists because identical USB dongles alias:
+     two config names can resolve to one physical port, or one name can be unstable
+     across reboots. `AudioDeviceResolver` only exposes `available_devices() ->
+     frozenset[str]` (membership), so aliasing is undetectable. The seam enforces
+     "name in set," NOT "each station → distinct stable physical port." Who pays:
+     Station 2 transmits on Station 4's frequency — the exact failure R10 targets.
+     Resolver must expose name→stable-port-id; distinctness checked on resolved id.
+
+  3. **`time(0,0)`-as-24:00 lets a degenerate grid tile "validly."**
+     `_validate_tiling` passes a two-slot `[00:00→00:00, 00:00→00:00]` grid (first
+     ok, last ok, pairwise 00:00==00:00 ok) — meaningless, and Phase-1 `find_now`
+     against it is undefined. Plan only tests the single all-day slot. Root cause:
+     overloading `time(0,0)` for both day-start and day-end. The §9-Q3 sentinel
+     (minutes-from-midnight 0–1440 / a `DayTime` type) removes the whole bug class.
+
+  Noted concerns: `_replace_keep_bak` reads+rewrites the whole live file every save
+  (read/write amplification at Phase-1 schedule sizes); fixtures are *untagged*
+  WAVs so the rich tag path (`_first` spellings, `_parse_year`) is only covered by
+  the *optional/hedged* committed-MP3 fixture — that hedge is where coverage-gaming
+  hides (90% lines, zero asserted titles/years); make the tagged-fixture test
+  mandatory with value assertions. `rglob` silently flattens `oldies/1960s/` into
+  `oldies` with no log.
+
+  Conceded strong: persistence `except BaseException: tmp.unlink` + crash-mid-write
+  durability test (monkeypatch `os.replace`) is the right paranoia; `extra="forbid"`
+  + discriminated unions correctly realizes R16; `safe_load`-only with `!!python`
+  rejection test is textbook; injected `resolver`/`clock_weekday` keeps validation
+  deterministic + hardware-free; dependency-sorted TDD order imports nothing
+  unwritten; deferrals (R14/R15/R19) are reasoned, not lazy.

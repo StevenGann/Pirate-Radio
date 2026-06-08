@@ -69,3 +69,21 @@
   targets: the FastAPI control plane + log-query endpoint (§15, contradicts §2),
   provider sprawl (3 LLM / 3 TTS), and pydub. Tech debt taken silently: §15 vs
   §2 contradiction, and "flat JSON for everything" lumping logs in with state.
+- _2026-06-07_ — Rev 1 distilled review adopted my R4/R8/R22 faithfully — voted
+  AYE. Rev 2: client overruled (DeepSeek in v1, Control API in v1); both bounded
+  tightly (auth/envelope only, API after MVP, R8' = no flat-JSON log scan). Voted
+  AYE — legitimate product authority, no speculative generality crept in.
+- _2026-06-07_ — Phase 0 implementation plan review (Round 1). Plan is unusually
+  disciplined: aggressive deferral table (§1.2), real-fixtures-over-mocks test
+  strategy, frozen models, every dep justified. My YAGNI verdict on the 3 open
+  questions: Q1 (cached Catalog index) = NO, value object now, `groups()` recompute
+  is O(n) on a few thousand tracks and Phase 1 isn't written — premature opt.
+  Q2 (validate all grids vs today's) = today's only for v1 + ship the
+  `validate_all_grids` helper but don't wire it into boot; validating future-day
+  grids against *today's* catalog can false-reject. Q3 (PyYAML vs ruamel) = PyYAML,
+  read-only confirmed; resolver seam = JUSTIFIED (it's R10's testability seam, not
+  speculative — but the real udev impl deferral is correct). Silent debt spotted:
+  the `_replace_keep_bak` copy-then-replace doubles every state write's I/O (fine
+  for low-frequency state, name it), and `extra="forbid"` on `tts_providers:
+  dict[str,dict]` is a hole in R16 (a bare dict inside a forbid-extra model still
+  accepts arbitrary nested keys). 10-task breakdown is right-sized.

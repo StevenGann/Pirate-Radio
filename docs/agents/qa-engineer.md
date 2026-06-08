@@ -92,3 +92,29 @@ TDD-friendly and the 80% gate is honestly achievable.
   package-wide while CI runs `-m "not hardware"` → hardware lines count in the
   denominator (coverage hazard, logged above). Imposed durable requirements
   (section above). Phase 1 (§20) stub-TTS plan aligns well with TDD.
+- _2026-06-07_ — Rev 1 distillation (0001) adopted 7-0; I voted AYE. R18-R21
+  captured faithfully + bonus testability wins (R14 AudioBuffer, R15 error
+  taxonomy, R16/R17 discriminated unions, R11/R12 find_now gap path, R22
+  pyloudnorm). Rev 2 (0002): client put Control API in v1 (D4) + R8' (logs via
+  journald/SQLite, not JSON scan). Confirmed FastAPI surface is testable in-process
+  via TestClient + app.dependency_overrides, no network/hardware; adds to coverage
+  numerator. Voted AYE. R18-R21 carry over unchanged.
+- _2026-06-07_ — Phase 0 implementation plan review (docs/plans/phase-0-...).
+  Strong TDD plan: RED tests precede every module, dependency-sorted impl order,
+  real-mutagen-on-generated-WAVs (correct call — exercises the real tag-zoo
+  fallback, not a lying mock), tmp_path everywhere, FixedClock rejects naive dt.
+  R18 met (clock is the only now() source + injectable weekday in load_config).
+  R20 met HONESTLY: zero hardware code this phase because R10's udev mechanism is
+  deferred to Phase 4 behind a resolver seam (StaticAudioDeviceResolver in CI) —
+  the *policy* is fully tested now. Durable testability rules I added this round:
+  (a) crash-injection coverage for atomic-write (monkeypatch os.replace/os.fsync to
+  raise mid-write, assert live-or-bak always valid + no .tmp leak) is REQUIRED, not
+  buried prose — must be an explicit RED test in PR4. (b) every "skip+log
+  unreadable" path (metadata None, scanner skip) must assert the WARNING was logged
+  via caplog, not just that the file is absent — otherwise silent-swallow regresses.
+  (c) determinism tests must compare across two *independent* scans of a mutated
+  tree (add/remove a file), not just `scan()==scan()` on an identical tree.
+  My positions on the plan's open Qs: Q1 value-object now (don't pre-optimize); Q2
+  validate ALL present grids at load (catch broken saturday.yaml on Tuesday — fail
+  fast is the whole point of §12); Q3 accept 00:00->00:00 as all-day pinned by test,
+  but ALSO require an explicit zero-length / start==end!=00:00 rejection test.
