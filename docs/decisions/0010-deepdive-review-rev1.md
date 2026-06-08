@@ -105,3 +105,30 @@ missed and team validation caught. Remediation in progress; remaining validators
   only; the TTS-credential preflight is an explicit Phase-2 carry-forward. (The real
   check still lands in Phase 2 when a TTS engine reads those vars.)
 - Gate after remediation: ruff + ruff-format + mypy clean, **194 tests**, 97.81% cov.
+
+## Team validation — Batch 1 (Old Man, QA Engineer, RPi Expert), staggered
+
+All three **CONFIRM**; no new CRITICAL/HIGH. Independent re-reads validated A4, R5/R6/R17
+(persistence), R10/A2 (audio devices), R14-R17, D6, and the clock DST fix itself
+(`_system_zone_name` parses `/etc/timezone` + the `/etc/localtime` `zoneinfo/<name>`
+symlink tail correctly for Raspberry Pi OS Bookworm; fixed-offset fallback is visibly
+WARNed, not silent).
+
+- **Convergent finding — QA MEDIUM / Old Man LOW: clock.py third fallback tier untested.**
+  When `_system_zone_name()` returns a *name* but `ZoneInfo(name)` raises (e.g. tzdata
+  absent), the `try/except` → fixed-offset path (clock.py ~145-146) had no test, so an
+  impl that dropped the guard would pass. **Remediated:** added
+  `test_unloadable_system_name_degrades_to_fixed_offset_with_warning` (monkeypatches
+  `_system_zone_name`→`"Fake/Zone"`, asserts no-raise + tz-aware + WARNING names the
+  value) and tightened `test_unresolvable_system_zone_degrades...` to assert the WARNING
+  names `PIRATE_RADIO_TZ`. Branch now covered.
+- **LOW housekeeping (Old Man):** README test count refreshed; BUILD-LOG "(commit
+  pending)" language removed.
+- **LOW declined (RPi Expert): numpy `platform_machine == "aarch64"` marker.** Pinning
+  it would strip numpy from x86_64 dev/CI (this host + GitHub runners), breaking the
+  suite; numpy ships x86_64 + aarch64 wheels and only 32-bit armhf lacks one (not
+  cleanly expressible as a marker). The documented prose warning in README/pyproject
+  stands as the right mitigation.
+- Gate after Batch-1 remediation: ruff + ruff-format + mypy clean, **195 tests**, 98.08% cov.
+
+Remaining validators to run staggered: Fact Checker + Field Operator.

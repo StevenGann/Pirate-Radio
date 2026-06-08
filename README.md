@@ -37,7 +37,7 @@ mypy
 pytest -m "not hardware"
 ```
 
-Current gate: ruff + mypy clean, **186 tests**, ~98% coverage.
+Current gate: ruff + mypy clean, **195 tests**, ~98% coverage.
 
 ### Testing philosophy
 

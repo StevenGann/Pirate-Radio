@@ -152,6 +152,23 @@ def test_unresolvable_system_zone_degrades_to_fixed_offset_with_warning(
         clk = SystemClock()
     assert clk.now().tzinfo is not None
     assert any(r.levelno == logging.WARNING for r in caplog.records)
+    # The WARNING must name the env override as the remedy (diagnosable, not generic).
+    assert "PIRATE_RADIO_TZ" in caplog.text
+
+
+def test_unloadable_system_name_degrades_to_fixed_offset_with_warning(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Third fallback tier: the system resolves a NAME but ZoneInfo() can't load it
+    # (e.g. /etc/timezone names a zone whose tzdata package is absent). Must degrade
+    # to a fixed offset — not crash — and WARN naming the offending value. Without
+    # this test a regression that dropped clock.py's try/except would pass silently.
+    monkeypatch.delenv("PIRATE_RADIO_TZ", raising=False)
+    monkeypatch.setattr(clock_mod, "_system_zone_name", lambda: "Fake/Zone")
+    with caplog.at_level(logging.WARNING, logger="pirate_radio.clock"):
+        clk = SystemClock()
+    assert clk.now().tzinfo is not None
+    assert "Fake/Zone" in caplog.text
 
 
 def test_default_uses_resolved_system_name(monkeypatch: pytest.MonkeyPatch) -> None:

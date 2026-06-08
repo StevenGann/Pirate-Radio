@@ -68,11 +68,17 @@ virtual-time/Sleeper-seam contract (P2) nailed. All committed; resume is lossles
   Fixed HIGH: stale README rewritten. Fixed MEDIUM: strict-tdd.md focused-panel note.
   Carry-forward: loudness_target_lufs bound (Phase 2); design-doc §6/§8.4 corrections
   (when resume/generator land).
-- **Team validation (started):** Senior Dev CONFIRM. **Devil's Advocate DISPUTE → found
-  a HIGH the manager pass missed: clock.py DST freeze.** Both DA findings remediated
-  via bug-fix TDD (8 RED→GREEN clock regression tests, 3-0; config docstring softened).
-  Gate: 194 tests, 97.81% cov, ruff/mypy clean. (commit pending)
-- Remaining validators to run staggered: Old Man + QA + RPi, then Fact Checker + Field Op.
+- **Team validation:** Senior Dev CONFIRM. **Devil's Advocate DISPUTE → found a HIGH
+  the manager pass missed: clock.py DST freeze.** Both DA findings remediated via
+  bug-fix TDD (clock regression tests, 3-0; config docstring softened). (commit 5d377de)
+- **Batch 1 (Old Man + QA + RPi) — all CONFIRM, no new CRITICAL/HIGH.** Convergent
+  finding (QA MEDIUM / Old Man LOW): clock.py third fallback tier (system name resolves
+  but `ZoneInfo()` can't load it — missing tzdata) was untested → added regression test
+  + tightened the unresolvable-host WARNING assertion. LOW housekeeping: README count
+  refreshed; "(commit pending)" language removed. RPi LOW (numpy platform marker)
+  **declined** — an `aarch64` marker would strip numpy from x86_64 dev/CI; prose warning
+  stands. Gate after batch-1 remediation: 195 tests, ruff/mypy clean.
+- Remaining validators to run staggered: Fact Checker + Field Operator.
 
 ## Notes
 - Quality gate as of grid: ruff clean, mypy clean (10 files), 101 tests, 98.30% cov.
