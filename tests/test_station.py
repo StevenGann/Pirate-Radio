@@ -189,3 +189,24 @@ async def test_run_reports_status_transitions(tmp_path, monkeypatch) -> None:
     with contextlib.suppress(asyncio.CancelledError):
         await task
     assert StationState.ON_AIR in states  # the operator can see the station went on air
+
+
+async def test_run_logs_the_operator_starting_and_on_air_vocabulary(
+    tmp_path, monkeypatch, caplog
+) -> None:
+    import logging
+
+    async def _fake_play_day(**kw):
+        pass
+
+    monkeypatch.setattr("pirate_radio.station.play_day", _fake_play_day)
+    monkeypatch.setattr("pirate_radio.station.load_with_recovery", lambda *a, **k: _schedule())
+    st = _station(tmp_path)
+    with caplog.at_level(logging.INFO):
+        task = asyncio.create_task(st.run())
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+    msgs = "\n".join(r.message for r in caplog.records)
+    assert "PiRate One starting" in msgs and "PiRate One on air" in msgs  # §H, station-tagged

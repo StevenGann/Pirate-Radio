@@ -260,6 +260,22 @@ class Coordinator:
             seed=derive_seed(day, station.name),
         )
 
+    # ---- --regenerate oneshot (H-FieldOp-4) -----------------------------------------------
+    def regenerate_now(self, only: str | None = None) -> int:
+        """FORCE-regenerate + persist today's schedule for all stations (or just ``only``) and
+        return the count. The ``--regenerate`` oneshot tool: it writes files and does NOT touch the
+        day-roll Events, so a running daemon is unaffected (it picks up a manual regen on its next
+        day-roll or restart — documented). A bad ``only`` name is a loud ``ConfigError``."""
+        count = 0
+        for station in self.stations:
+            if only is None or station.name == only:
+                station.prepare_next_day(force=True)
+                logger.info("regenerated today's schedule for %s", station.name)
+                count += 1
+        if only is not None and count == 0:
+            raise ConfigError(f"--regenerate: no station named {only!r}")
+        return count
+
     # ---- status registry + summary --------------------------------------------------------
     def _record(self, status: StationStatus) -> None:
         self.registry[status.name] = status

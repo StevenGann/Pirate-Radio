@@ -88,11 +88,13 @@ class Station:
         self._on_status = on_status
         self._poisoned: set[int] = set()  # supervisor advance-past-poison net (defensive)
 
-    def prepare_next_day(self) -> None:
-        """Generate + persist the schedule for the clock's current day if absent (the midnight task
-        calls this just after the roll, BEFORE ``signal_day_roll`` — the file-then-event ordering,
-        §E/Q2). Reuses ``_load_or_generate`` so cold-start, restart, and day-roll share one path."""
-        self._load_or_generate(self._clock.now().date())
+    def prepare_next_day(self, *, force: bool = False) -> None:
+        """Generate + persist the schedule for the clock's current day (the midnight task calls this
+        just after the roll, BEFORE ``signal_day_roll`` — the file-then-event ordering, §E/Q2).
+        Reuses ``_load_or_generate`` so cold-start, restart, and day-roll share one path. ``force``
+        (the ``--regenerate`` oneshot) overwrites an existing file — an operator regenerating after
+        grid edit wants the NEW grid, not the cached schedule."""
+        self._load_or_generate(self._clock.now().date(), force=force)
 
     def signal_day_roll(self) -> None:
         """Set the day-roll Event (the midnight task calls this AFTER ``prepare_next_day`` has
@@ -112,12 +114,15 @@ class Station:
     def _schedule_path(self, day: date) -> Path:
         return self._state_dir / self.name / f"{day.isoformat()}.json"
 
-    def _load_or_generate(self, day: date) -> DailySchedule:
+    def _load_or_generate(self, day: date, *, force: bool = False) -> DailySchedule:
         path = self._schedule_path(day)
-        try:
-            return load_with_recovery(path, DailySchedule, schema_version=SCHEDULE_SCHEMA_VERSION)
-        except StateCorruptionError:
-            pass  # R6: absent or corrupt -> regenerate from source (NOT a crash-loop)
+        if not force:  # force (--regenerate) skips the load so an edited grid is picked up
+            try:
+                return load_with_recovery(
+                    path, DailySchedule, schema_version=SCHEDULE_SCHEMA_VERSION
+                )
+            except StateCorruptionError:
+                pass  # R6: absent or corrupt -> regenerate from source (NOT a crash-loop)
         grid = self._grid_loader(day)
         schedule = generate_schedule(
             grid=grid,
@@ -135,10 +140,12 @@ class Station:
             await self._sleeper.sleep(self._start_delay)
         while True:
             self._status(StationState.STARTING)
+            logger.info("station %s starting", self.name)  # operator log vocabulary (§H)
             day = self._clock.now().date()
             schedule = self._load_or_generate(day)
             anchored = anchor(schedule, transition_silence=self._config.transition_silence_seconds)
             self._status(StationState.ON_AIR)
+            logger.info("station %s on air (schedule %s)", self.name, day.isoformat())
             await play_day(
                 anchored=anchored,
                 now=self._clock.now(),

@@ -1,0 +1,32 @@
+[Unit]
+Description=PiRate Radio — automated multi-station FM broadcaster
+Documentation=file:/opt/pirate-radio/docs/ops/first-boot.md
+# Wait for the network (LAN LLM/TTS) AND a corrected clock — the schedule + day-roll are
+# wall-clock-driven, so starting before time-sync would anchor the day to a bogus time (H24).
+After=network-online.target time-sync.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# R7 tier-1: the OS restarts the daemon (the only tier that recovers a native SIGSEGV the in-process
+# supervisor cannot catch). NO WatchdogSec in v1 — a watchdog without a real sd_notify heartbeat just
+# adds a footgun; a genuine heartbeat is a documented optional upgrade.
+Restart=on-failure
+RestartSec=2
+# C2: bound the restart thrash — after 5 failures in 60s, enter a terminal `failed` state (a human
+# looks) instead of an infinite fast crash-loop. Pairs with the in-process supervisor's own ceiling.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Secrets (LLM/TTS api_key_env vars) come from a root-owned 0600 file — NEVER from this unit or the
+# config (H22). The daemon reads each by name at build; the value never touches logs or the repo.
+EnvironmentFile=/etc/pirate-radio/secrets.env
+
+User=pirate
+Group=pirate
+ExecStart=/opt/pirate-radio/.venv/bin/python -m pirate_radio --config /etc/pirate-radio/config.json
+# Mutable state (schedules) lives off the boot SD card (A6); StateDirectory is created 0700.
+StateDirectory=pirate-radio
+
+[Install]
+WantedBy=multi-user.target
