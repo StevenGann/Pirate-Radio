@@ -13,6 +13,7 @@ keys (A3). The weekday for grid resolution comes from an injected ``Clock`` (A4)
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Annotated, Literal
@@ -28,6 +29,8 @@ from pirate_radio.schedule.grid import (
     resolve_grid_path,
     validate_grid_against_catalog,
 )
+
+logger = logging.getLogger(__name__)
 
 _FROZEN = ConfigDict(frozen=True, extra="forbid")  # extra="forbid": typos are errors
 _KNOWN_TTS_BACKENDS = frozenset({"piper", "espeak", "elevenlabs"})
@@ -131,6 +134,7 @@ class DaemonConfig(BaseModel):
     model_config = _FROZEN
     llm: LLMConfig
     tts_providers: dict[str, dict[str, object]] = Field(default_factory=dict)
+    state_dir: Path  # A6: mutable-state root (schedules, future resume/cache) off the boot SD
     stations: tuple[StationConfig, ...] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -173,8 +177,24 @@ def _validate_config(config: DaemonConfig, *, resolver: AudioDeviceResolver, wee
     _check_unique_station_names(config)
     _check_audio_devices(config, resolver)
     _check_env_vars_present(config)
+    _check_state_dir(config)
     for station in config.stations:
         _check_station_dirs(station, weekday)
+
+
+def _check_state_dir(config: DaemonConfig) -> None:
+    """A6: state_dir must exist AND be writable (it's where schedules/cache are written).
+
+    Only state_dir is writability-checked; content_dir/schedule_dir are read-only by
+    nature (curated library + hand-authored grids, possibly a read-only mount) and only
+    need to be readable — the narrowed A6 reading ratified 7/7 in 0009 §Q1.
+    """
+    sd = config.state_dir
+    if not sd.is_dir():
+        raise ConfigError(f"state_dir missing or not a directory: {sd}")
+    if not os.access(sd, os.W_OK):
+        raise ConfigError(f"state_dir is not writable: {sd}")
+    logger.info("state_dir resolved to %s", sd)  # A6: log where mutable writes land
 
 
 def _check_unique_station_names(config: DaemonConfig) -> None:

@@ -44,7 +44,12 @@ code-quality + documentation review. See memory `overnight-autonomous-build`.
   Added `FailingTTS`/`FailingDecoder` fakes. Focused 3-panel Rev1 3-NAY → Rev2 **3 AYE / 0 NAY**
   (DA caught the `AudioBuffer ==`→ValueError; QA/Senior caught the P1 "don't drop slow item"
   contradiction). `0013`. 250 tests, 98.54% cov, pipeline ~100%.
-- [ ] P1-7 config state_dir (A6) · P1-8 catalog cache (A9) — **next.**
+- [x] P1-7 config `state_dir` (A6: mutable state off the boot SD; required, exists+writable,
+  logged). Focused panel 1-NAY → adopted; A6 narrowing (only state_dir writable; content/
+  schedule readable) was already ratified 7/7 in 0009 §Q1. Folded: state_dir-as-file, a
+  deterministic mocked-os.access writability test, isinstance(Path) + resolved-path log
+  assertions, `match=`. `0014`. 257 tests, 98.56% cov.
+- [ ] P1-8 catalog cache (A9) — **next** (also lands the committed golden-JSON P5 guard).
 - NOTE: the committed golden-JSON cross-run determinism guard (P5) still pending — fold into P1-8.
 - NOTE: `run_once` is the producer+player harness over pre-selected items; the
   `DailySchedule → find_now → run_once` daily slice is the Phase-4 coordinator's job.
