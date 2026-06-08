@@ -19,7 +19,7 @@ code-quality + documentation review. See memory `overnight-autonomous-build`.
 - [x] **PR10 cleanup** — `hello()` retired; smoke imports real modules.
 - [x] Phase 0 COMPLETE — 133 tests, ruff/mypy clean, 98.51% cov.
 
-### Phase 1 — MVP vertical slice (single station, stub TTS, gapless playback)  — PLAN ADOPTED
+### Phase 1 — MVP vertical slice (single station, stub TTS, gapless playback)  — ✅ COMPLETE
 - [x] Implementation plan authored (planner) + panel review distilled `0009` →
   **adopted 6 AYE / 0 NAY / 1 abstain** (Fact Checker transient rate-limit).
   Governing amendments appended to `docs/plans/phase-1-implementation-plan.md`.
@@ -49,7 +49,13 @@ code-quality + documentation review. See memory `overnight-autonomous-build`.
   schedule readable) was already ratified 7/7 in 0009 §Q1. Folded: state_dir-as-file, a
   deterministic mocked-os.access writability test, isinstance(Path) + resolved-path log
   assertions, `match=`. `0014`. 257 tests, 98.56% cov.
-- [ ] P1-8 catalog cache (A9) — **next** (also lands the committed golden-JSON P5 guard).
+- [x] P1-8 catalog cache (A9) + committed golden P5 guard — focused panel Rev1 2-NAY → Rev2
+  **3 AYE / 0 NAY** (DA caught the `is`-identity cache gaming → scan-spy; QA/DA caught the
+  byte-exact golden's pydantic fragility → value-equality compare). `CatalogCache` dict-keyed
+  by content_dir, dir-mtime signature, FAT/in-place-edit limits documented (H9). Golden
+  fixture committed. `0015`. **267 tests, 98.60% cov.**
+- **Phase 1 COMPLETE** — P1-1..P1-8 all green. NOT a deployable radio yet (coordinator/
+  supervisor/midnight-regen/systemd/real audio = Phase 4, H10).
 - NOTE: the committed golden-JSON cross-run determinism guard (P5) still pending — fold into P1-8.
 - NOTE: `run_once` is the producer+player harness over pre-selected items; the
   `DailySchedule → find_now → run_once` daily slice is the Phase-4 coordinator's job.

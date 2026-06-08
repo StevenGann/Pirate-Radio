@@ -108,11 +108,36 @@ _ALLDAY_CLASSICAL = _grid(Slot(start=time(0, 0), end=time(0, 0), group="classica
 # --- R19 determinism (the headline) ------------------------------------------------
 
 
+_GOLDEN = Path(__file__).parent / "fixtures" / "golden_allday_seed7.json"
+
+
 def test_same_inputs_give_byte_identical_json() -> None:
     cat, st, clk = _big_catalog(), _station(), _clock()
     a = generate_schedule(grid=_ALLDAY_CLASSICAL, catalog=cat, station=st, clock=clk, seed=7)
     b = generate_schedule(grid=_ALLDAY_CLASSICAL, catalog=cat, station=st, clock=clk, seed=7)
     assert a.model_dump_json() == b.model_dump_json()
+
+
+def test_matches_committed_golden_schedule() -> None:
+    # P5: cross-machine / across-commits determinism tripwire. We compare PARSED schedules
+    # (value equality), not raw bytes — so an accidental change to generator *content*
+    # (items, durations, order, seed) is caught, while harmless pydantic JSON-formatting
+    # drift across the allowed version range is not (that conflates our determinism with
+    # pydantic's). Byte-stability within one environment is covered by
+    # test_same_inputs_give_byte_identical_json.
+    #
+    # To regenerate after a DELIBERATE generator change (commit the new file in the same
+    # change). `_golden_schedule()` is the single source of truth for both halves:
+    #   _GOLDEN.write_text(_golden_schedule().model_dump_json(), encoding="utf-8")
+    expected = DailySchedule.model_validate_json(_GOLDEN.read_text(encoding="utf-8"))
+    assert _golden_schedule() == expected
+
+
+def _golden_schedule() -> DailySchedule:
+    """Canonical (catalog, grid, station, clock, seed) build behind the P5 golden."""
+    return generate_schedule(
+        grid=_ALLDAY_CLASSICAL, catalog=_big_catalog(), station=_station(), clock=_clock(), seed=7
+    )
 
 
 def test_persist_load_regenerate_is_identical(tmp_path: Path) -> None:
