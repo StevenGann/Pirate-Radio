@@ -17,6 +17,10 @@ dependencies = [
     "numpy>=1.26,<3",  # AudioBuffer (R14); 64-bit Raspberry Pi OS / arm64 only (H8)
     "pyloudnorm>=0.2.0,<0.3",  # EBU R128 loudness (R22); pure-Python, unit-testable (Phase 2)
     "scipy>=1.15,<2",  # resample_poly for TTS rate matching (Q2); aarch64 cp311/cp312 wheels (H8)
+    "anthropic>=0.107,<1",  # Claude Messages API (D2); sync client hopped via to_thread (R23).
+    # Pin verified against PyPI 2026-06-08 (current 0.107.1, still 0.x). Pure-Python + native
+    # jiter/pydantic-core that ship prebuilt aarch64 cp311/cp312 wheels (clean on 64-bit Pi OS).
+    "httpx>=0.27,<1",  # DeepSeek + Ollama + ElevenLabs (Phase 3); native-async, pure-Python wheel.
 ]
 
 [project.optional-dependencies]
@@ -55,6 +59,7 @@ addopts = [
 ]
 markers = [
     "hardware: tests that require real Raspberry Pi hardware (skipped in CI)",
+    "network: tests that make real network calls to LLM/TTS providers (skipped in CI; R21)",
     "slow: long-running tests",
 ]
 
