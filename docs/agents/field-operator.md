@@ -87,6 +87,37 @@ flagging it so the deployer makes an informed choice.
 
 ## Notes log
 
+- _2026-06-07_ — Phase 1 plan review (`docs/plans/phase-1-implementation-plan.md`,
+  887 lines). This is the first phase that actually broadcasts unattended, so it's
+  back in my lane. Verdict: the resume design is genuinely power-cut-safe — §4.4
+  states NO persisted playhead; resume is reconstructed purely from
+  `(persisted schedule, clock.now())`, so cold-start == post-crash by construction
+  (§6) and A7's "no hot-path writes" is honored (schedule written once at
+  generation, read back via find_now). R5/R6 reused for the schedule file. A6
+  state_dir lands now WITH the first state writer (correct timing) — exists +
+  writable + logs the path. R11 backstop fires on `buffer.get` timeout AND on
+  ProviderError (player catches it) — a stalled/failed producer plays canned audio,
+  not dead air; pinned by virtual-time tests. Field gaps I'm raising:
+  (1) **No daemon loop / midnight-regen / supervisor in Phase 1** — explicitly
+  deferred (run_once test harness only). That's fine for the slice BUT it means
+  "unattended broadcast" is NOT yet demonstrated end-to-end; the thing that runs
+  for weeks (coordinator + midnight roll + crash-restart) is all still future.
+  Must not be mistaken for "Phase 1 = deployable radio." (2) **find_now past
+  end-of-day returns all-None and the doc says "caller regenerates" — but there is
+  no caller in Phase 1.** Same gap as the StateCorruptionError→regenerate consumer
+  in Phase 0: the recover-by-regenerate loop is specified but unwired until the
+  coordinator exists. (3) **R11 refill budget is a guessed config default** (Q3) —
+  StubTTS/FakeDecoder are instant, so the budget can't be validated against real
+  latency until Phase 2. Backstop *mechanism* is proven; the *threshold* is not
+  field-tuned. Acceptable if flagged. (4) **A6 writability read narrowed**: plan
+  applies W_OK only to state_dir, treats content_dir/schedule_dir as read-only-OK
+  — I AGREE (read-only library/grids on a separate mount is a valid, even
+  desirable, field setup), but the §8.4 path correction (generated schedules go
+  under state_dir, not schedule_dir/generated) must be ratified or generated files
+  land on a possibly-read-only or boot-SD volume. The good: clock injection +
+  seedable RNG mean a mid-day crash regenerates the SAME schedule for the day
+  (derive_seed is date+station), so resume is truly stable across restarts — that's
+  exactly the field property I want.
 - _2026-06-07_ — Panel established. Awaiting design doc. My first three flags for
   whenever it lands: power-loss safety, SD-write budget, and the legality of the
   transmission mode.

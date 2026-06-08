@@ -156,3 +156,46 @@
   rejection test is textbook; injected `resolver`/`clock_weekday` keeps validation
   deterministic + hardware-free; dependency-sorted TDD order imports nothing
   unwritten; deferrals (R14/R15/R19) are reasoned, not lazy.
+
+- _2026-06-07_ — **Phase 1 Implementation Plan Round 1.** My three Rev-1 design
+  objections are genuinely delivered, not deferred: R11 backstop is a real
+  `buffer.get(timeout=budget)` → play canned `AudioBuffer`; R12 re-anchors `find_now`
+  on the nearest exact `track` (with a deliberately-drifted-estimate test); the
+  find_now gap path returns a typed `NowPlaying(item=None, next_item, gap_seconds)`,
+  no raw-None ambiguity; cold-start==resume is genuinely one path (both reconstruct
+  from persisted schedule + clock.now(), no playhead — A7).
+
+  Principled objection (would→NAY): **the player drain loop `for _ in range(count)`
+  counts a backstop iteration against `count`.** On a missed refill the player plays
+  the backstop AND consumes one of its `count` iterations without draining the real
+  segment, so the slice plays fewer than `count` real items — i.e. the backstop can
+  *mask a silently DROPPED item*. R11's real property is "never dead air AND no item
+  dropped"; the plan proves only the first. Worse, the planned tests don't catch it:
+  `test_slow_producer_fires_backstop` asserts the backstop is in `played` but NOT
+  that the backstopped item subsequently plays; `test_gapless_ordering` only runs
+  the happy path where no backstop fires. Fix: decouple backstop-fill from item-
+  advance (the real segment must still be consumed+played after the backstop), and
+  add a test asserting backstop-THEN-real-item ordering with no item lost.
+
+  Noted concerns: R11 refill budget is admitted unset (Q3) — mechanism shipped,
+  guarantee rides on a guessed `refill_budget_seconds`; honest, but the "never dead
+  air" guarantee is only as good as that number, and there's no warm/deeper buffer
+  at block boundaries yet. R12 re-anchor removes drift at each *track* but still
+  propagates patter *estimate* error between consecutive non-track items — invisible
+  in Phase 1 (StubTTS deterministic, estimate==reality) but a latent Phase-2 hole in
+  find_now's offset contract. R19 determinism test is same-process (`a==b` in one
+  run); the stated contract is "byte-identical on every machine" — the cross-version/
+  cross-machine claim is stronger than what's tested (float repr, MT, choices are in
+  practice stable, so low risk). Midnight rollover (§8.6) is deferred with no regen
+  daemon: a Phase-1 station running past end-of-day gets all-None from find_now and
+  goes silent — in-scope-consistent but should be named. A6 writability reinterpreted
+  as "state_dir writable, content/schedule readable" — sensible, flag for ratify.
+
+  Conceded sound: AudioBuffer normalized (frames,channels) float32 shape with
+  __post_init__ validation; ScheduleItem discriminated union (R17) makes invalid
+  states unrepresentable; FakeDecoder at exact metadata duration keeps timing real
+  while audio is silent (right call — Phase 1 thesis is timing not fidelity);
+  Sleeper virtual-time seam = zero wall-clock sleeps in pipeline tests; sounddevice
+  as optional extra + lazy import so CI never loads PortAudio; transition_silence
+  kept OUT of duration so the exact-track re-anchor stays exact; deferring real
+  ffmpeg decode to Phase 2 (paired with loudness per R22) is correctly reasoned.

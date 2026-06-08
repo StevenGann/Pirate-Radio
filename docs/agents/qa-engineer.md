@@ -118,3 +118,25 @@ TDD-friendly and the 80% gate is honestly achievable.
   validate ALL present grids at load (catch broken saturday.yaml on Tuesday — fail
   fast is the whole point of §12); Q3 accept 00:00->00:00 as all-day pinned by test,
   but ALSO require an explicit zero-length / start==end!=00:00 rejection test.
+- _2026-06-07_ — Phase 0 tests-first reviews (errors/clock/persistence/catalog/
+  grid/config). Caught & blocked two real regressions: (1) persistence omitted a
+  test forcing the parent-DIR fsync (R5 power-loss line) — a non-durable impl would
+  pass; fixed via os.fsync spy + S_ISDIR check. (2) config regressed adopted A2 —
+  used string-set resolver, never tested two names aliasing one physical port; fixed
+  to resolve(name)->PortId distinctness. Also NAY'd grid tests for missing §8.3
+  "time formats parse" coverage. Lesson logged: bare pytest.raises(SameError) is a
+  weak fence; demand match= on the failure reason, and always test the ACTUAL
+  contract line (dir-fsync, port-alias), not a proxy.
+- _2026-06-07_ — Phase 1 plan review (docs/plans/phase-1-...). Hardest phase to
+  test; plan is strong (Sleeper seam, FakeAudioSink, StubTTS/FakeDecoder, R19
+  byte-identical headline test, find_now->typed NowPlaying). KEY TESTABILITY DEFECT:
+  LookAheadBuffer.get uses asyncio.wait_for(q.get(), timeout) — a REAL wall-clock
+  timeout — so the R11 backstop deadline is NOT routed through the Sleeper seam,
+  contradicting R21 "zero wall-clock sleeps". The slow-producer->backstop test would
+  either really wait refill_budget seconds or use a tiny timeout (flaky on loaded
+  CI). The refill deadline MUST go through the injected Sleeper/clock, not
+  asyncio.wait_for. Also flagged: virtual-time fakes need a documented determinism
+  story (how does the player "wait" advance virtual time and wake the producer?) —
+  asyncio.Queue + a hand-rolled VirtualSleeper don't compose automatically. Imposed
+  requirements + positions in review. R19/R20 otherwise honest; only
+  SoundDeviceSink.play is hardware+pragma.

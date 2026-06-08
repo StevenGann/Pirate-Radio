@@ -40,6 +40,7 @@ minversion = "8.0"
 testpaths = ["tests"]
 addopts = [
     "-ra",
+    "--import-mode=importlib",  # allow same-basename test files across dirs (no __init__)
     "--strict-markers",
     "--strict-config",
     "--cov=pirate_radio",

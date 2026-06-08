@@ -53,6 +53,27 @@
 
 ## Notes log
 
+- _2026-06-07_ — Phase 1 (MVP slice) plan review. Architecture is strong: clean
+  pipeline decomposition (timing/segment/buffer/producer/player), R17
+  ScheduleItem discriminated union with shared `_ItemBase` (invalid states
+  unrepresentable), R14 AudioBuffer as a frozen validated dataclass (correct call
+  vs Pydantic — NumPy never JSON-round-trips), R15 ProviderError subtree landed
+  base-only with the failover wrapper deferred to Phase 3, `find_now` upgraded to
+  a typed `NowPlaying` (R11 gap path explicit, no raw None). Verified signatures
+  against merged Phase-0 (Catalog in scanner.py, load_config(path,*,resolver,
+  clock), StationConfig fields, persistence *,schema_version, Slot 24:00=
+  time(0,0)) — all match. Durable positions:
+  - **Top risk — final 24:00 slot boundary.** Generator's elided `_slot_boundary`
+    must map `Slot.end == time(0,0)` to NEXT-day midnight, else `boundary-cursor`
+    is negative and the last block never fills. Not pinned by a named test. MAJOR.
+  - `groups[slot.group]` bare-indexed → KeyError on empty/absent group; config
+    cross-checks only TODAY's grid (Q2). Guard with a typed error. MINOR Phase 1.
+  - R15 base-only is right scope, but catching *any* ProviderError (incl.
+    ProviderFatal) for the backstop blurs the retryable/fatal line; document as
+    provisional, Phase-3 failover refines.
+  - Q1: A6 state_dir governs §8.4 prose — AYE. Q2: exact-track re-anchor is the
+    right v1 commitment; freeze the find_now/NowPlaying contract. Q3: fixed
+    config-default budget now; defer measurement spike + warm-buffer to Phase 2.
 - _2026-06-07_ — Phase 0 implementation-plan review. Plan faithfully implements
   R5/R6/R17 (atomic persistence + schema_version envelope), R16 discriminated
   unions (TTS+LLM keyed on `backend`, `extra="forbid"`), R18/D6 (injectable

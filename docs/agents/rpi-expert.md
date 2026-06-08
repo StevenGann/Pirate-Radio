@@ -129,3 +129,45 @@
     OS, and only the zone (not instant) is resolved here, so OK. Host should have
     NTP + correct /etc/timezone. The PIRATE_RADIO_TZ override floated in Open Q5 is
     worth adopting for deterministic deployments.
+
+- _2026-06-07_ — **Phase 1 plan review (RPi lens).** Phase 1 = single-station MVP
+  slice (schedule gen + asyncio look-ahead pipeline + AudioBuffer/numpy + persisted
+  schedule + find_now). Most on-Pi compute (real ffmpeg/Piper/loudness) is wisely
+  DEFERRED to Phase 2 behind Decoder/TTS Protocols; Phase 1 uses silent buffers.
+  Durable Pi findings:
+  - **numpy on Pi: ARM64 wheels exist (manylinux aarch64), fine on Pi 4/5 64-bit
+    Bookworm.** Caveat: 32-bit Raspberry Pi OS (armv7/armhf) has NO numpy manylinux
+    wheel -> pip builds from source (needs BLAS/gfortran, slow). Pi 3 in 32-bit
+    mode = build-from-source pain. Recommend pinning 64-bit Bookworm as the runtime
+    assumption (Pi 3 supports arm64). Flag as assertion.
+  - **AudioBuffer memory: float32 @ 48kHz stereo = 384 KB/s; a 4-min track ≈ 92 MB.**
+    THIS IS LARGE. Plan stores whole-track decoded buffers in the look-ahead queue
+    (depth 1-2). Single station depth-2 ≈ 2 whole tracks ≈ <200MB — OK on 1GB Pi 3
+    but tight; at 4 stations (Phase 4) that's ~800MB of audio buffers alone, which
+    BLOWS Pi 3's 1GB and is heavy even on Pi 4 4GB. The whole-track-in-RAM decode
+    model is the real RAM risk, deferred to Phase 2/4 but the Protocol shape is set
+    now. STRONGLY recommend Phase 2 FfmpegDecoder stream/chunk rather than decode
+    whole tracks to one buffer; flag the AudioBuffer-whole-track contract as a future
+    RAM blocker for multi-station. (Loudness R128 also wants whole-signal for
+    integrated LUFS — tension with chunking; note for Phase 2.)
+  - **A7 resume-state hot-path: EXCELLENT resolution.** Phase 1 writes the daily
+    schedule ONCE at generation (cold path) and reconstructs resume purely from
+    (persisted schedule + clock.now()) via find_now — NO persisted playhead, so NO
+    per-item fsync. This fully honors A7. The cold==resume identity (§6) is what
+    makes it free. Confirmed sound.
+  - **A9 mtime-cached rescan: planned** (catalog/cache.py, step 8 / P1-8) as a
+    wrapper over scan_catalog. Good — avoids re-walking SD-resident library on every
+    boot. Verify cache invalidates on content_dir mtime (a new file in a subfolder
+    bumps the subfolder mtime, but a modified existing file may not bump the parent
+    dir mtime — mtime-of-dir-tree is coarse; acceptable for Phase 1, note for robustness).
+  - **A6 state_dir off boot SD: implemented** with exists+writable validation and
+    resolved-path logging. Generated schedules go to state_dir/schedules/... (A6
+    governs over §8.4's schedule_dir/generated prose — correct call). state_dir on
+    external SSD/USB is the right Pi deployment.
+  - **asyncio offload for 4-core Pi:** Phase 1 single-station, pure asyncio, blocking
+    native work via asyncio.to_thread documented in Protocols. Sane. The real 4-core
+    contention (4 stations × Piper+loudness via to_thread) is Phase 4 — my earlier
+    F1 guideline (Pi 4 = baseline w/ staggered patter) still governs there.
+  - **SoundDeviceSink deferral: correct.** Lazy import of sounddevice inside play(),
+    optional `audio` extra so CI never loads PortAudio, single @pytest.mark.hardware
+    smoke test, pragma:no cover. R20-clean.

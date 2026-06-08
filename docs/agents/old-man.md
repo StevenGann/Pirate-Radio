@@ -87,3 +87,20 @@
   for low-frequency state, name it), and `extra="forbid"` on `tts_providers:
   dict[str,dict]` is a hole in R16 (a bare dict inside a forbid-extra model still
   accepts arbitrary nested keys). 10-task breakdown is right-sized.
+- _2026-06-07_ — Phase 1 plan review (Round 1). Plan is disciplined and earns most
+  of its complexity: numpy is warranted (AudioBuffer is real now, FakeDecoder still
+  produces real-shaped buffers); FakeDecoder/Decoder Protocol deferral of ffmpeg to
+  Phase 2 is the right call (timing is the thesis, not fidelity; R22 pairs decode
+  with loudness). The 5-file pipeline split is justified — each is a genuinely
+  different concern (timing seam, segment value, bounded queue, producer, player)
+  and the style rule is <150-line files; not premature. 8-PR breakdown right-sized.
+  Concerns: (1) station_id/block_reminder emission, reminder cadence (30min), and
+  the 0.05 repeat down-weight are HARDCODED magic numbers — silent debt, name them
+  as constants/config. (2) StationIdItem duration=5.0 / reminder=8.0 are guesses
+  that affect timing math. (3) the §8.4-vs-A6 path conflict (Q1) is real and the
+  plan resolves it correctly (A6 governs) — ratify. Positions: Q1 = A6 governs,
+  state_dir. Q2 = exact-track re-anchor (R12 opt 2) is correct, simpler, no find_now
+  rewrite — DON'T pull hourly-ID in now. Q3 = FIXED default budget now, NO
+  measurement spike (no real latency data exists until Phase 2; spike is YAGNI),
+  and DEFER warm-buffer-at-boundaries (no measured need). A6 writability read
+  (state_dir writable, other two readable) is the sensible interpretation.
