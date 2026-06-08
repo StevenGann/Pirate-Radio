@@ -1,188 +1,159 @@
-# Phase 4 Implementation Plan — Multi-Station (Coordinator · Supervisor · systemd · Real Audio Sink · Midnight Regeneration) — **Rev 1 (for panel review)**
+# Phase 4 Implementation Plan — Multi-Station (Coordinator · Supervisor · systemd · Real Audio Sink · Midnight Regeneration) — **Rev 2 (re-vote)**
 
-> **Status:** Rev 1 — **REVISE (5 AYE / 2 NAY, 2026-06-08).** The seven-agent panel reviewed this and sent it back per the ≥2-NAY charter (NAY: Devil's Advocate, Field Operator). Fact Checker verified every referenced symbol against the tree (no corrections). The consolidated Rev-2 revision brief — adopt-blocking CRITICALs (serial-render/short-patter audible-backstop-loop; render-poison crash-loop; `libportaudio2` apt prereq; `WatchdogSec` footgun; `After=sound.target` fix), HIGHs, and the ratified open-question rulings — is in `docs/decisions/0033-phase4-plan-rev1-vote.md`. **Rev 2 must fold all of 0033, then re-vote.**
+> **Status:** Rev 2 — revised after the Rev-1 vote (5 AYE / 2 NAY → REVISE; NAY: Devil's Advocate, Field Operator). Fact Checker verified every referenced symbol against the tree (no corrections). This revision folds **every** adopt-blocking CRITICAL, HIGH, and ratified open-question ruling from `docs/decisions/0033-phase4-plan-rev1-vote.md`. Strict spec-driven TDD applies (tests authored from spec → panel-reviewed BEFORE implementation → GREEN → ruff/mypy `--strict`/pytest gate → one decision record per increment). Charter: ≤1 NAY adopts; ≥2 NAY → revise + re-vote.
 >
-> **(original Rev-1 status:)** authored from spec for seven-agent panel review. Strict spec-driven TDD applies (PiRate standing directive + MEMORY): every RED test is authored from this spec and **panel-reviewed BEFORE any implementation**, then driven GREEN. No code touches the tree until the panel signs off. Charter: ≤1 NAY adopts; ≥2 NAY → revise + re-vote.
-> **Builds on:** Phases 0–3 (all the per-item mechanics — config, catalog, generator, resume, the look-ahead pipeline, the AI DJ + ranked failover, the `dj/build.py` boot seam). Phase 4 **wires proven seams**, it does not rebuild them.
-> **Governing authority:** `PiRate_Radio_Design_Doc.md` §5.1, §5.4, §8.6, §20, and §21 Review Resolutions (R6/R7/R8′/R9/R10/R11/R12/R13/R18/R19/R20/R21/R23, D4/D6, A6) + `docs/decisions/0001`–`0032`. Where this plan and §21 disagree, **§21 governs.**
+> **Rev-2 changelog (every item is a `0033` must-fix or ratified ruling):**
+> 1. **(CRITICAL C1, DA) The serial-render / short-patter audible backstop-loop is now FIXED, not documented.** The fix is architectural: the coordinator **computes the look-ahead depth from the grid's worst consecutive-patter run** so the producer pre-renders a patter cluster *during the preceding multi-minute track* (which masks the serial renders); patter generation is **staggered/jittered across stations** (no 4-core thundering herd); and the depth is **bounded by a RAM ceiling** (C1 + H-RPi-2 + H-RPi-3 converged). The irreducible residual (cold start, or a block that *opens* with back-to-back patter and no masking track) is honestly bounded to **one render → R11 backstop**, and a startup WARNING fires for it — but the sustained-loop case is eliminated by buffer depth. See §A.
+> 2. **(CRITICAL C2, DA + Field-Op) Render-poison crash-loop closed.** `load_with_recovery` only catches *parse* corruption; a structurally-valid schedule with a render-poisoning item replayed identically = infinite loop, globalized by escalation. Fix: the supervisor **advances past a poison item** after K identical-offset crashes (skip + backstop that slot, log loudly) rather than replaying; the systemd unit sets `StartLimitIntervalSec`/`StartLimitBurst` → terminal `failed` + a loud final line. See §C, §H.
+> 3. **(CRITICAL, RPi) `sounddevice` needs system `libportaudio2` (apt) — no Linux wheel bundles PortAudio.** Documented as a hard runtime prereq; the `sounddevice` import is lazy (R20/R21). See §G, P4-1.
+> 4. **(CRITICAL, RPi + Field-Op) `WatchdogSec` footgun resolved:** v1 ships `Type=simple` + `Restart=on-failure` (NO `WatchdogSec` without a heartbeat); a real `sd_notify` heartbeat is a documented optional upgrade. See §H.
+> 5. **(CRITICAL, RPi) systemd `After=` fixed:** `network-online.target` (+ `Wants=`) + `time-sync.target`, NOT `sound.target`; the daemon **tolerates a not-yet-present device / not-yet-up LAN at boot** (retry/degrade-to-backstop, don't crash). See §F, §H.
+> 6. **(HIGH, DA) Midnight regen-failure is per-station isolated + non-fatal** (never escapes the coordinator TaskGroup); the **in-flight-item-straddles-midnight** flow is specified + tested. See §E.
+> 7. **(HIGH, DA) Seek-into-first-item guards `offset_frames > decoded.frames`** (VBR/truncated/metadata-lying files) — clamp + skip-to-next, trim by the buffer's OWN rate post actual-rate check. See §B.
+> 8. **(HIGH, RPi) udev rules key on the PHYSICAL USB PORT PATH, not serial** (CM10x dongles share/empty serials → wrong station on wrong transmitter); the resolver bridges PortAudio device-string ↔ ALSA `hw:CARD=` and tests both namespaces. See §F.
+> 9. **(HIGH, Field-Op) Operability layer:** a minimal in-memory `StationStatus` + a periodic all-stations summary log line (Q6); a named, `station_name`-tagged operator **log vocabulary** with restart/regen visibility as asserted gates; a `docs/ops/first-boot.md` runbook; defined `--regenerate` semantics. See §D, §H.
+> 10. **(HIGH, Senior) Honest churn:** threading `recent_tracks` requires adding the param to `build_dj_context`/`Producer`/`run_once` (back-compat default `()`) — the "frozen/zero-churn" framing is corrected; `item_kind` removal is its **own** named increment (8 call sites). See §B, P4-5b.
+> 11. **Ratified rulings:** Q1 decode+slice in `daily.play_day` (not churn `run_once`); Q2 `asyncio.Event`, **write-file-then-set** ordering; Q3 record in `play_day` (look-ahead-ordered, pinned in a test); Q4 leave `build_dj_context` in the producer (coordinator owns inputs); Q5 worst-case as a single PURE tested fn with **named constants**; Q6 minimal `StationStatus`, **no DTO module, no HTTP**; Q7 construction-from-one-format **+** first-buffer assert; Q8 fixed-window ceiling → process exit, **no per-cause branching**; Q9 persistent `sd.OutputStream` + explicit `blocksize`/`latency` + xrun=logged-glitch + **dedicated sink executor** + stream lifecycle close; Q10 `python -m pirate_radio`.
+> 12. **Wording:** "per-station audio format" → "the single fixed global station format (`DEFAULT_SAMPLE_RATE`, mono)" — there is no `sample_rate`/`channels` config field.
+
+> **Governing authority:** `PiRate_Radio_Design_Doc.md` §5.1, §5.4, §8.6, §20, §21 (R6/R7/R8′/R9/R10/R11/R12/R13/R18/R19/R20/R21/R23, D4/D6, A6/A7) + `docs/decisions/0001`–`0033`. Where this plan and §21 disagree, §21 governs.
 
 ## Overview
 
-Phase 4 turns the Phase 0–3 library into a **deployable radio**. Phases 0–3 shipped every per-item mechanic but nothing yet drives a *whole station for a whole day*, supervises N stations, plays to a real device, or rolls the schedule at midnight (the BUILD-LOG states this explicitly).
+Phase 4 turns the Phase 0–3 library into a **deployable radio**. It is thin orchestration over proven seams: a daily-slice driver, a per-station loop, a coordinator owning shared services + DJ inputs + the midnight task, a two-tier supervisor (in-process + systemd), a real `SoundDeviceSink`, a real `UdevAudioDeviceResolver`, and a logging entrypoint. Two constraints stay central: **never dead air (R11)** and **virtual-time testability (R18/R21)**.
 
-Phase 4 is thin orchestration: a station loop that slices `DailySchedule → find_now → run_once`, a coordinator that owns shared services + DjContext inputs + the midnight task, an in-process supervisor (R7 tier 2) plus a systemd unit (R7 tier 1), a real `SoundDeviceSink` behind the existing `AudioSink` Protocol, a real `UdevAudioDeviceResolver` (the slot `audio_devices.py` already reserves), and a logging entrypoint (`__main__.py`).
-
-Two load-bearing constraints stay central: **never dead air (R11)** and **virtual-time testability (R18/R21)** — the station loop and midnight task take an injected `Clock` + `Sleeper`, exactly like `run_once` already does.
-
-## Requirements
-
-- Run N stations (`config.json` `stations`) from a single `asyncio` daemon, each on its **own distinct physical audio device** (R10/A2 already enforced at config load via `_check_audio_devices`).
-- Each station: load-or-generate today's `DailySchedule`, resume mid-day via `find_now` (R11 gap path + R12 re-anchor already implemented), render+play its day gaplessly through the existing pipeline with the R11 backstop.
-- Two-tier supervision (R7): in-process supervisor restarts a crashed station task to known-good state without touching siblings; a systemd unit owns the process and recovers a native SIGSEGV.
-- Midnight regeneration (§8.6, R18): a coordinator task sleeps to next midnight (DST-correct via the injected `Clock`'s `zoneinfo` tz), regenerates each station's schedule, re-reads grids; the in-flight segment is **not** interrupted (finish, splice at next boundary). First-start generates if absent.
-- Real `SoundDeviceSink` behind `dj/protocols.py:AudioSink`, gapless (§10), hardware-marked (R20: only the literal `sounddevice` write is `@pytest.mark.hardware`).
-- The coordinator **owns DjContext inputs** and threads `text_generator`/persona/station into each station loop (migrating `run_once`'s defaulted DJ args upward, §7-Q4) and maintains a real **rolling `recent_tracks` history** per station.
-- A **stated, bounded worst-case refill budget** so play-time ≥ refill-time at cold start / on short-item runs (the DA liveness concern).
-- A logging entrypoint (`__main__.py`) that configures structured logging before the coordinator starts.
-
-## Scope & Non-Goals
-
-**In Phase 4:** `coordinator.py`, `supervisor.py`, `station.py`, `pipeline/daily.py`, `midnight.py`, `audio/sink.py` (`SoundDeviceSink`), the real `UdevAudioDeviceResolver` in `audio_devices.py`, `__main__.py` + `logging_setup.py`, `systemd/pirate-radio.service` + `docs/ops/` notes, and the carry-forwards (1–6) each in a named increment.
-
-**Deferred — Phase 5 (offline tagging):** the AcoustID/MusicBrainz batch tool. **Deferred — Phase 6 (Control API, D4):** FastAPI, `GET /logs` (R8′/R23), bearer auth — Phase 4 ships **no** HTTP server but must not block the loop in a way that would later starve those handlers, and should expose station status as a plain in-memory structure the API can later read (Q6).
-
-**Explicitly NOT in Phase 4 (with rationale):**
-- **Subprocess isolation of the player (R13):** design-doc downgraded "promote to subprocess" to "expect a real refactor." Keep the station boundary clean (the `AudioSink` Protocol is the seam) but do **not** build subprocess isolation; SIGSEGV recovery is delegated to the systemd tier (R7).
-- **Proactive rate limiting** (`max_requests_per_minute`, §7-Q5): RESERVED/NOT ENFORCED (per 0032). Quotas stay reactive (failover).
-- **`SIGHUP` config reload** (§8.7): `config.json` changes require a daemon restart in v1.
-- Crossfading, multi-format/stereo stations (Phase 2 fixed mono + one station format).
-
-## Architecture
-
-New modules, MANY SMALL FILES (<400 lines each), dependency flow strictly downward (no cycles); the coordinator is the only module importing config + build + all the others.
+## Architecture (modules; MANY SMALL FILES <400 lines; strictly downward deps)
 
 ```
-__main__.py            NEW  entrypoint: logging setup -> load_config -> Coordinator.run()
-logging_setup.py       NEW  structured-logging configuration (R8' stdout/journald)
-coordinator.py         NEW  owns shared services (catalog, DJ chains, persona), DjContext
-                            inputs, the midnight task; constructs + supervises N stations
-supervisor.py          NEW  in-process restart-on-failure (R7 tier 2); known-good restart,
-                            backoff, sibling isolation
-station.py             NEW  per-station orchestration: load-or-generate schedule, find_now,
-                            drive the daily slice; the supervised unit
-pipeline/daily.py      NEW  DailySchedule + find_now + Clock -> the ordered items for "today
-                            from now", fed to run_once; the seam run_once's docstring names
-midnight.py            NEW  sleep-to-next-midnight (injected Clock, DST-correct) + regenerate
-audio/sink.py          NEW  SoundDeviceSink (AudioSink Protocol); only the sd write is hardware
-audio_devices.py       EDIT add real UdevAudioDeviceResolver (the reserved Phase-4 slot)
-systemd/pirate-radio.service   NEW  R7 tier 1 unit (Restart, WatchdogSec, After=)
-docs/ops/udev-audio.md NEW  the udev-rule recipe for stable USB dongle names (R10)
+__main__.py            NEW  entrypoint: logging -> load_config -> Coordinator.run() (python -m pirate_radio)
+logging_setup.py       NEW  structured logging (R8' stdout/journald) + the operator log vocabulary
+coordinator.py         NEW  shared services; DjContext inputs; look-ahead-depth + RAM + stagger budget;
+                            midnight task; supervises N stations; owns the StationStatus registry
+supervisor.py          NEW  R7 tier-2: restart-to-known-good, sibling isolation, backoff (Sleeper),
+                            crash-loop ceiling -> escalate; advance-past-poison-item
+station.py             NEW  per-station loop: load-or-generate, find_now, drive the daily slice;
+                            updates its StationStatus; the supervised unit
+pipeline/daily.py      NEW  AnchoredSchedule + find_now -> remaining items + seek + leading gap;
+                            play_day (gap silence -> seek-trim first segment -> run_once)
+midnight.py            NEW  next_midnight (injected Clock, DST) + per-station isolated regenerate
+audio/sink.py          NEW  SoundDeviceSink (AudioSink); persistent sd.OutputStream; only the write hardware
+audio_devices.py       EDIT real UdevAudioDeviceResolver (port-path keyed; PortAudio<->ALSA bridge)
+status.py              NEW  StationStatus (frozen, in-memory; NO DTO/HTTP — Q6)
+systemd/pirate-radio.service   NEW  R7 tier-1 (Type=simple, Restart=on-failure, StartLimit*, After=)
+docs/ops/first-boot.md NEW  the ordered install runbook (config + secrets + udev + systemd + verify)
+docs/ops/udev-audio.md NEW  port-path udev recipe + udevadm discovery/verify walk
 ```
 
-Reused **unchanged**: `pipeline/run_once` + `Producer`/`Player`/`LookAheadBuffer`/`timing.py`, `schedule/resume.py`, `schedule/generator.py`, `dj/build.py`, `config.py`, `catalog/`, `persistence.py`, `clock.py`.
+Reused **unchanged**: `pipeline/run_once`+`Producer`/`Player`/`LookAheadBuffer`/`timing.py`, `schedule/resume.py`, `schedule/generator.py`, `config.py`, `catalog/`, `persistence.py`, `clock.py`. **Additively changed** (back-compat defaults, honest churn): `pipeline/producer.py`+`run_once` gain a `recent_tracks` param (default `()`); `dj/protocols.py`+backends+fakes drop the redundant `item_kind` param (its own increment).
 
-### Control flow (one cold start)
+## §A — The look-ahead budget (C1 fix: depth + RAM + stagger) — `coordinator.py`
 
-```
-__main__  -> logging_setup -> Coordinator(config, clock, resolver, sink_factory, sleeper)
-   builds once (shared): CatalogCache per content_dir, RankedTextGenerator per resolved LLM,
-                         persona per station, RankedTTSEngine per station, one backstop per format
-   Supervisor.run([Station(...) for s in config.stations]) + midnight task, gathered
-   each Station task -> load_or_generate(today) -> daily.slice_from_now(find_now) -> run_once(...)
-```
+The Rev-1 "refill budget" only WARNed; this is the real fix. Three coupled quantities the coordinator computes once from the resolved config + grid:
 
-## Per-Module Low-Level Design
+- **Look-ahead depth (the C1 fix).** The producer renders **serially**, so the only thing that lets it stay ahead of a short-patter cluster is a buffer deep enough to pre-render the cluster *while the preceding multi-minute track plays*. Compute `depth = max_consecutive_non_track_items(grid) + 1` (a block boundary may emit e.g. `block_transition`+`station_id` back-to-back). Pass it as `run_once(..., maxsize=depth)`. During the long track before a cluster, the serial producer renders the whole cluster ahead — the track masks the ~90s renders. **`_worst_consecutive_patter(grid) -> int`** is a PURE, unit-tested function.
+- **RAM ceiling (H-RPi-2).** Whole-track float32 buffers ≈ `DEFAULT_SAMPLE_RATE × 4 bytes × seconds` (≈11.5 MB/min mono). The total look-ahead footprint is `Σ_stations(depth × worst_track_bytes)`. The coordinator clamps `depth` so this stays ≤ a configured fraction of `psutil`-free / a fixed budget (e.g. ≤ 40% RAM), and emits a **startup WARNING** naming the clamp. `_ram_bounded_depth(depth, worst_track_seconds, n_stations, ram_budget_bytes) -> int` — PURE, tested.
+- **Stagger (H-RPi-3).** To avoid N stations firing Piper/cloud renders on the same tick (4-core thundering herd, synchronized top-of-hour IDs), the coordinator assigns each station a **fixed render-stagger offset** (e.g. `i * stagger_step`), applied as an initial delay via the injected `Sleeper` before the station's first render. Deterministic per index (R19-style, no `Math.random`), virtual-time-testable.
+- **Worst-case render (Q5, named constants).** `worst_case_patter_render(llm, tts_chain) = sum(llm timeouts) + sum(tts timeouts)`; `worst_case_track_render = decode_timeout`. A single PURE tested function; the default timeout numbers (`20.0` LLM, `30.0` TTS, `120.0` decode) are **named constants** with a derivation comment. The coordinator logs a **startup WARNING** when `worst_case_patter_render > shortest_schedulable_patter_item` AND that item can open a block with no masking track (the irreducible residual → R11 backstop for one render).
 
-### `pipeline/daily.py` — the daily-slice driver (the seam `run_once` names)
-- `slice_from_now(anchored: AnchoredSchedule, now: datetime) -> tuple[list[ScheduleItem], float, float]` — PURE. Uses `AnchoredSchedule.find_now(now)` to compute: items from the current/next item through end-of-day, the **seek offset** into the first item (`NowPlaying.offset_seconds`), and the **leading gap silence** (`NowPlaying.gap_seconds`, R11).
-- `async def play_day(...)`: if in a gap, play `gap_seconds` of silence via the sink first (R11), then call `run_once(items=remaining, ...)`. **Seek-into-first-item** is the one new mechanic — **Q1:** extend `run_once`/`Producer` with `first_offset_seconds` (clean but churns a frozen, 100%-covered signature) vs trim in `daily.play_day` (keeps `run_once` frozen). Recommendation: trim in `daily.play_day`.
-- 100% pure/virtual-time; tested with `FixedClock`, `FakeAudioSink`, `VirtualSleeper`, `StubTTS`/`FakeDecoder`, synthetic `DailySchedule`.
+**Honest residual (stated, not hidden):** cold start (no prior audio) and a block that *opens* with a patter cluster degrade to the R11 backstop for the duration of one render. This is bounded (one render, not a sustained loop) and audible-as-bumper, not silence. The sustained-cluster-loop Rev-1 hole is eliminated by depth.
 
-### `station.py` — per-station orchestration (the supervised unit)
-- `class Station` holding resolved **immutable** deps (config slice, `RankedTextGenerator`, `RankedTTSEngine`, persona, backstop, sink, clock, sleeper, refill budget, the per-station `recent_tracks` deque). Construction does no I/O, no network (R21).
-- `async def run(self)`: (1) `_load_or_generate(today)` — `load_with_recovery(...)`; on `StateCorruptionError` (R6) or absence, `generate_schedule(...)` with `derive_seed(day, station.name)` + `atomic_write_json(...)` (first-start + R6 no-crash-loop). (2) `anchor(schedule, transition_silence=...)` (R12). (3) `slice_from_now(...)`. (4) `play_day(...)` threading the DJ chain/persona/station/loudness/format/backstop/sleeper/refill budget into `run_once`. (5) at end-of-day, await the next-day signal — **Q2:** poll `find_now` vs an `asyncio.Event` set by the midnight task. Recommendation: `asyncio.Event`.
-- **§7-Q4 migration (CF1):** the DJ args `run_once`/`Producer` currently *default* are now **always supplied** by the Station from coordinator-owned values; the defaults stay for back-compat.
-- **rolling `recent_tracks` (CF1):** coordinator owns a per-station `deque(maxlen=N)` of `TrackMeta`; **Q3:** record at the Player (air-accurate, touches a frozen file) vs `daily.play_day` (look-ahead-ordered, no churn). Recommendation: `daily.play_day`.
-- Fully testable with fakes; the sink is injected.
+## §B — `pipeline/daily.py` (slice + seek + gap) + `recent_tracks`
 
-### `coordinator.py` — shared services + DjContext inputs + midnight
-- `class Coordinator(config, clock, resolver, sleeper, sink_factory)`. `sink_factory(port_id, sample_rate, channels) -> AudioSink` is the injection seam (tests → `FakeAudioSink`; prod → `SoundDeviceSink`; the coordinator never imports `sounddevice`).
-- **Build-once shared services (§5.1):** per station resolve LLM (`resolve_station_llm`), `build_text_generator(llm)` (cache per identical resolved LLM — shared providers share one chain), `resolve_persona`, `build_tts_engine(...)`, `CatalogCache`, one pre-normalized backstop per station format.
-- **DjContext inputs (§7-Q4, CF1):** **Q4:** physically move `build_dj_context` to the coordinator vs leave it in the producer and have the coordinator own only the *inputs*. Recommendation: leave it (moving churns a 100%-covered file); the coordinator supplies real persona/station/recent_tracks so the producer sentinels are never hit in production.
-- **Worst-case refill budget (CF2 — load-bearing liveness):** compute `worst_case_render = Σ(llm timeouts) + Σ(tts timeouts)` (and the decode bound) from the *resolved config* (defaults: 3×20s LLM + 30s TTS ≈ 90s; decode 120s) — the coordinator is the only place that sees the whole chain. Set `refill_budget_seconds` + look-ahead `maxsize` so the R11 backstop fires promptly and the warm-buffer-at-boundary rule holds. **Q5:** also *cap* per-call timeouts so Σ < shortest item, vs accept R11 backstop coverage + a startup WARNING when `worst_case_render > shortest grid item`. Recommendation: WARNING + backstop coverage (R11 already guarantees no dead air; the stall degrades to the canned bumper, not silence).
-- **decoder/TTS actual-rate verification (CF5, 0022/0032):** wire decoder + TTS + backstop from **one** `(sample_rate, channels)` per station so they agree by construction; **Q7:** + an explicit first-rendered-buffer assertion in the daily driver. Recommendation: both.
-- `async def run(self)`: `asyncio.gather(supervisor.run(stations), midnight_task.run(stations))` under one `TaskGroup`.
+- `slice_from_now(anchored, now) -> tuple[list[ScheduleItem], float, float]` — PURE; from `AnchoredSchedule.find_now(now)`: remaining items, `NowPlaying.offset_seconds`, `NowPlaying.gap_seconds`.
+- `play_day(...)` — if in a gap, play `gap_seconds` of silence (a buffer at the **station format** — asserted, H-QA-2) via the sink first (R11); then **decode+slice the first item** by `offset_seconds` and play the trimmed segment directly, then `run_once(items=remaining[1:], ...)` (Q1 — keeps `run_once` frozen).
+  - **Seek guard (H-DA-2):** trim by the *decoded buffer's own rate*; if `offset_frames >= decoded.frames` (VBR/truncated/metadata-lying), **skip to the next item** (do not emit an empty buffer → backstop); `offset` taken straight from `NowPlaying` (never re-derived, so non-negative by construction).
+- **`recent_tracks` (Q3, honest churn):** `play_day` appends each aired `TrackItem`'s `TrackMeta` to the coordinator-owned per-station `deque(maxlen=N)`; this is **look-ahead-ordered, NOT air-accurate under a backstop substitution** — pinned in a test (H-QA-MEDIUM-3). Threading it to the DJ requires adding `recent_tracks` to `build_dj_context`/`Producer`/`run_once` (back-compat default `()`).
+- 100% pure/virtual-time (FixedClock, FakeAudioSink, VirtualSleeper, StubTTS/FakeDecoder, synthetic DailySchedule).
+
+## §C — `supervisor.py` (R7 tier-2; advance-past-poison)
+
+- `Supervisor(sleeper, *, on_escalate)`; `run(units)`. `Supervisable` = `async run()` + `name`.
+- Per unit in its own child task; on a non-`CancelledError` exception: **scrub** the message (no secrets), log a `station_name`-tagged WARNING with the cause + restart count, backoff via the injected `Sleeper` (fixed or simple-multiplier — **no per-cause branching**, Q8), restart-to-known-good (re-enter `Station.run()` → reload/re-anchor from disk, R6/R12). **Sibling isolation** (§5.4): one crash never cancels another.
+- **Advance-past-poison (C2):** the Station tracks the offset/item of its last crash; on **K identical-offset crashes** it skips that item (logs CRITICAL, airs the backstop for that slot) and continues — a render-poison item can never infinite-loop.
+- **Crash-loop ceiling → escalate (Q8):** fixed-window restart count; on breach, log CRITICAL + call the injected `on_escalate` (default → process exit so the systemd tier restarts) — **tested via the injected seam, not a real `sys.exit`** (H-QA-MEDIUM-2).
+- Cannot catch a native SIGSEGV (R7) — explicitly the systemd tier's job (documented).
+- 100% pure with a crash-on-Nth-call fake + `VirtualSleeper`; **R6 corruption→regenerate exercised THROUGH the supervisor restart path** (Old-Man condition), plus the poison-skip path.
+
+## §D — `coordinator.py` (shared services, DJ inputs, budget, status, midnight)
+
+- `Coordinator(config, clock, resolver, sleeper, sink_factory)`; `sink_factory(port_id) -> AudioSink` is the injection seam (tests → `FakeAudioSink`; prod → `SoundDeviceSink`; the coordinator never imports `sounddevice`).
+- **Build-once (§5.1):** per station resolve LLM (`resolve_station_llm`), `build_text_generator(llm)` (cache per identical resolved LLM — shared chains), `resolve_persona`, `build_tts_engine(...)`, `CatalogCache`, one pre-normalized backstop. Computes the §A budget (depth/RAM/stagger/worst-case) once.
+- **DJ inputs (Q4):** `build_dj_context` stays in the producer; the coordinator supplies real persona/station/tagline/`recent_tracks` so the producer sentinels never fire in production.
+- **Actual-rate (Q7, CF5):** decoder + TTS + backstop wired from the **one global format** (`DEFAULT_SAMPLE_RATE`, mono) so they agree by construction; the daily driver asserts the first rendered buffer's `(sample_rate, channels)` (`run_once._assert_station_format` already guards the backstop side).
+- **StationStatus registry (Q6):** owns a per-station `StationStatus` (see §status); a coordinator task logs a periodic **all-stations summary** ("N/N ON AIR …") so "is it broadcasting?" is answerable from journald alone — no HTTP.
+- `run()`: `asyncio.gather(supervisor.run(stations), midnight.run(stations))` under one `TaskGroup`.
 - Imports no hardware; tested with `StaticAudioDeviceResolver` + a fake `sink_factory`.
 
-### `supervisor.py` — in-process supervision (R7 tier 2)
-- `class Supervisor(sleeper)`; `async def run(self, units)`. A `Supervisable` has `async def run()` + `name` (Station satisfies it).
-- Per unit: run in a child task; on a non-cancellation exception, log (scrubbed — CF6), backoff via the injected `Sleeper` (R21), and **restart to known-good state** (re-enter `Station.run()` → re-loads/re-anchors from disk, R6/R12). **Sibling isolation (§5.4):** one unit's crash never cancels another.
-- Backoff + crash-loop ceiling → escalate to process exit so the systemd tier restarts the process. **Q8:** escalation threshold + same-cause behavior.
-- **Cannot** catch a native SIGSEGV (R7) — explicitly the systemd tier's job (documented).
-- 100% pure with a crash-on-Nth-call `Supervisable` fake + `VirtualSleeper`.
+## §E — `midnight.py` (sleep-to-midnight + per-station isolated regen, DST)
 
-### `midnight.py` — sleep-to-midnight + regenerate (§8.6, R18, DST-correct)
-- `next_midnight(now, tz) -> datetime` — PURE, DST-correct via `zoneinfo` (the clock's `tz()`); seconds-to-sleep = `(next_midnight(now) - now).total_seconds()`.
-- `async def run(self, stations)`: loop — compute sleep, `await sleeper.sleep(...)`, then per station re-read the grid (`resolve_grid_path`+`load_grid`+`validate_grid_against_catalog`, §8.7), `generate_schedule(...)`, `atomic_write_json(...)`, signal the day-roll (Q2).
-- **In-flight segment NOT interrupted (§8.6, CF4):** regen writes only the *next* day's file + flips the signal; never cancels the running `run_once`. The station finishes its current item, then re-slices at the next boundary.
-- `next_midnight` unit-tested across DST spring-forward + fall-back (explicit `ZoneInfo`); the loop with `FixedClock` + `VirtualSleeper`. Zero wall-clock.
+- `next_midnight(now, tz) -> datetime` — PURE, DST-correct via `zoneinfo` (the clock's `tz()`).
+- `run(stations)`: loop — sleep the computed seconds (`Sleeper`), then **per station, isolated:** re-read the grid (`resolve_grid_path`+`load_grid`+`validate_grid_against_catalog`), `generate_schedule`, `atomic_write_json`, then **set the station's day-roll `asyncio.Event`** (Q2 — **file written THEN event set**, an ordering contract that is tested). **Per-station try/except (H-DA-1):** a regen failure (bad tomorrow-grid, missing content) is logged CRITICAL and **the station keeps today's loaded schedule** — the exception **never escapes into the coordinator TaskGroup** (a bad tomorrow-grid must not take down today's broadcast at 00:00).
+- **In-flight not cut (§8.6):** regen writes only the next-day file + flips the signal; never cancels the running `run_once`. **Straddle-midnight flow (H-DA-1):** an item that starts 23:30 and ends 00:30 is the last of yesterday's slice → `run_once` returns when it finishes → the station then observes the day-roll Event and re-slices onto the new day (the gap until the new day's first item is one render, R11-covered). Specified + tested.
+- `next_midnight` unit-tested across DST spring-forward + fall-back (explicit `ZoneInfo`); the loop with `FixedClock`+`VirtualSleeper`; regen-failure isolation + straddle both tested. Zero wall-clock.
 
-### `audio/sink.py` — `SoundDeviceSink` (R20, the only new hardware)
-- `class SoundDeviceSink` implementing `AudioSink` (`async def play(buf)`, returns only when fully consumed — gapless, §10). The blocking PortAudio write goes via `asyncio.to_thread`. **Q9:** persistent `sd.OutputStream` held open per station (genuinely gapless) vs per-buffer `sd.play`/`sd.wait`. Recommendation: persistent stream.
-- **R20 thin seam:** ONLY the literal `stream.write(...)`/stream-open line is `# pragma: no cover` + `@pytest.mark.hardware`. Format coercion, the to_thread hop, and the stream lifecycle are pure, unit-tested with an injected `FakeOutputStream` (the stream factory is a constructor dependency, defaulting to the real `sd.OutputStream`). Plus a `@pytest.mark.hardware` smoke.
+## §F — `audio_devices.py` (real `UdevAudioDeviceResolver`) + udev recipe
 
-### `audio_devices.py` (EDIT) — real `UdevAudioDeviceResolver`
-- Add `class UdevAudioDeviceResolver` implementing the `AudioDeviceResolver` Protocol: configured `audio_device` name → stable `PortId` keyed on the physical USB port path (R10/A2). The udev/ALSA enumeration call is the hardware seam; the mapping logic is pure (injected fake enumeration). `StaticAudioDeviceResolver` stays the CI resolver. Ship the udev-rule recipe in `docs/ops/udev-audio.md`.
+- `UdevAudioDeviceResolver` implements `AudioDeviceResolver`: configured `audio_device` name → stable `PortId` **keyed on the physical USB port path** (R10/A2), NOT serial (CM10x dongles share/empty serials → wrong transmitter). It **bridges** the PortAudio device string ↔ ALSA `hw:CARD=<id>` ↔ the PortAudio device index. The udev/ALSA enumeration is the only hardware line (`pragma`/`@pytest.mark.hardware`); the name→PortId + namespace-bridge logic is PURE, tested with a fake enumeration **modelling BOTH namespaces** (H-RPi-1).
+- `docs/ops/udev-audio.md`: the port-path udev rule + the `udevadm info -a` discovery walk + a "reboot and re-verify" step + the note that moving a dongle to another port reassigns the station.
 
-### `__main__.py` + `logging_setup.py` (CF6 — Field-Op)
-- `logging_setup.configure_logging(level)`: structured logging to stdout/journald (R8′).
-- `__main__.py`: argparse (config path, `--regenerate`, log level), `configure_logging(...)` **first**, then `load_config(..., resolver=UdevAudioDeviceResolver(), clock=SystemClock(), preflight=True)`, construct `Coordinator` with the real `sink_factory` + `SystemClock` + `RealSleeper`, `asyncio.run(coordinator.run())`. Tested via a `main(argv, *, deps)` seam with injected fakes; the `asyncio.run` + real-resolver line is the only hardware-adjacent `pragma`. **Q10:** package is `src/pirate_radio` → `python -m pirate_radio`; confirm the entrypoint module path.
+## §G — `audio/sink.py` (`SoundDeviceSink`, R20) + libportaudio2
 
-## How Each Carry-Forward Is Addressed
+- `SoundDeviceSink` implements `AudioSink` (gapless, §10). **Persistent `sd.OutputStream`** opened once per station, `stream.write(buf.samples)` per call (Q9); explicit `blocksize` + `latency` (~80–150 ms headroom) pinned to avoid xruns on cheap dongles under a contended Pi. The blocking write hops via a **dedicated to_thread executor** (one thread per station) so playback writes never starve CPU normalize/decode in the shared default pool (RPi/DA-M1).
+- **xrun policy:** a `PaOutputUnderflowed` is **logged as a glitch and the stream continues** — NOT a crash, NOT a supervisor event (R11 does not cover xruns; an xrun is a degraded glitch, not dead air).
+- **Stream lifecycle:** the sink is an async context manager; the stream is closed in `finally` on station exit/restart so a crash-loop can't leak streams/threads (DA-M1).
+- **R20:** only the literal `stream.write`/stream-open line is `pragma`/hardware; format coercion, the to_thread hop, the lifecycle, and xrun handling are pure, tested with an injected `FakeOutputStream` (the stream factory is a constructor dep, default = real `sd.OutputStream`). `sounddevice` import is **lazy** (inside the factory/to_thread body) — a `no-module-scope-import` test guards R21 (H-QA-MEDIUM-1). A `@pytest.mark.hardware` smoke plays short silence.
+- **`libportaudio2` (CRITICAL, RPi):** `pyproject` adds `sounddevice`; `docs/ops/first-boot.md` + the P4-1 record document `sudo apt install libportaudio2` as a hard runtime prereq (the pure-Python wheel does NOT bundle PortAudio; pip-installs clean but imports fail without the system `.so`).
 
-| # | Carry-forward | Addressed in | Increment |
-|---|---|---|---|
-| 1 | Coordinator owns DjContext inputs + threads DJ args (§7-Q4); rolling recent_tracks | coordinator owns persona/station/recent_tracks; station always supplies them; `build_dj_context` stays put (Q4) | P4-5, P4-6 |
-| 2 | Worst-case summed-timeout refill budget (DA) | coordinator computes Σ timeouts, sets refill_budget+maxsize, startup WARNING; R11 backstop bounds dead air | P4-6 |
-| 3 | Two-tier supervision (R7) | `supervisor.py` (tier 2) + `systemd/pirate-radio.service` (tier 1) | P4-3, P4-8 |
-| 4 | Midnight regen, no mid-segment cut, first-start generates | `midnight.py` + `station._load_or_generate` | P4-7, P4-5 |
-| 5 | Real SoundDeviceSink + distinct ports + decoder/TTS actual-rate (0022) | `audio/sink.py`; `UdevAudioDeviceResolver`; coordinator wires one format + first-segment assert | P4-1, P4-2, P4-6 |
-| 6 | WARNING de-dup; `item_kind` removal; logging entrypoint; secret-scrub; tag-length cap | failover edit; Protocol param drop; `__main__`+`logging_setup`; supervisor scrub; cap in build_dj_context | P4-9, P4-5, P4-3 |
+## §status — `status.py` (`StationStatus`, Q6 — minimal, no HTTP)
 
-## Dependency-Ordered Increment Breakdown
+A frozen in-memory `StationStatus` per station: `name`, `state` (`starting|on_air|gap|regenerating|crashed|restarting`), `current_item`, `last_transition_at`, `restart_count`, `last_error`. Updated at the same points the operator log events fire. The coordinator holds the registry; a periodic task logs the all-stations summary. **No new DTO module beyond this frozen struct, no read-model, no HTTP** (Old-Man "zero speculative surface" + Field-Op "answerable from journald" reconciled). Phase 6 reads it; Phase 4 ships only the struct + the summary log.
 
-Each increment: strict spec-driven TDD (tests authored → RED → focused panel reviews the tests, QA+SeniorDev+DA; full-seven for the plan + phase gate → GREEN → ruff/mypy `--strict`/pytest gate → one decision record).
+## §H — entrypoint, logging vocabulary, systemd, ops docs (Field-Op)
 
-- **P4-1 — `SoundDeviceSink` (`audio/sink.py`)** + `sounddevice` dep. First: pure-logic + thin hardware seam, depends only on the frozen `AudioSink` Protocol. Gate: format coercion + to_thread offload + gapless lifecycle unit-tested with `FakeOutputStream`; only `stream.write` hardware; CI green `-m "not hardware"`.
-- **P4-2 — `UdevAudioDeviceResolver`** + `docs/ops/udev-audio.md`. Gate: name→PortId mapping unit-tested with fake enumeration; only the enumeration call hardware; `StaticAudioDeviceResolver` still the CI resolver.
-- **P4-3 — `supervisor.py`** + secret-scrub. Gate: crash-on-Nth restart count, backoff via `VirtualSleeper`, sibling isolation, crash-loop ceiling → escalation; scrubbed logs.
-- **P4-4 — `pipeline/daily.py`** (slice + seek/gap). Gate: `slice_from_now` correct across now-inside-item (R12 seek), now-in-gap (R11 silence + next), now-before-first, now-past-end (empty → regen signal); `play_day` plays gap then `run_once`; virtual time only.
-- **P4-5 — `station.py`** + `item_kind` Protocol cleanup + tag-length cap. Gate: first-start generates+persists; load; corruption→regenerate not crash-loop (R6); mid-day resume re-anchors (R12); day-roll re-slices; `patter(context)` (no `item_kind`) green across callers+fakes; full fakes.
-- **P4-6 — `coordinator.py`** (shared services, DjContext inputs, refill budget, actual-rate). Gate: shared-LLM reuse asserted (§5.1); real persona/station/recent_tracks; worst-case budget computed + startup WARNING when > shortest item (`caplog`); decoder+TTS+backstop one format + first-segment assert; injected `sink_factory`, no hardware.
-- **P4-7 — `midnight.py`**. Gate: `next_midnight` DST spring/fall correct; `run` sleeps computed seconds (`VirtualSleeper`), re-reads grids, regenerates+persists, signals; in-flight segment not cancelled; `--regenerate` path; zero wall-clock.
-- **P4-8 — `systemd/pirate-radio.service` + `__main__.py` + `logging_setup.py`** (CF6, R7 tier 1). Gate: unit has `Restart=on-failure`/`RestartSec`/`After=`/`WatchdogSec`/`EnvironmentFile=`; `logging_setup` asserted; `main(argv, *, deps)` tested with fakes (logging before config load).
-- **P4-9 — housekeeping (fall-through WARNING de-dup) + Phase-4 deep-dive.** Gate: de-dup asserted via `caplog`; full-seven deep-dive CONFIRM, no CRITICAL/HIGH; phase-gate numbers recorded.
+- `logging_setup.configure_logging(level)` (R8′ stdout/journald). **Operator log vocabulary** — a named, `station_name`-tagged event set, each an asserted gate (caplog): station `starting` / `on_air @ <track>` / `crashed (<cause>)` / `restart N/<ceiling>` / `backoff <Xs>` / `escalating` / `midnight regen <station> started|done items=N|FAILED <cause>` / `backstop fired`.
+- `__main__.py` (`python -m pirate_radio`, Q10): argparse (config path, `--regenerate`, `--log-level`), `configure_logging` **first**, then `load_config(..., resolver=UdevAudioDeviceResolver(), clock=SystemClock(), preflight=True)`, construct `Coordinator` with the real `sink_factory`+`SystemClock`+`RealSleeper`, `asyncio.run(coordinator.run())`. Tested via a `main(argv, *, deps)` seam with fakes (logging before config load); only the real-resolver/`asyncio.run` line is hardware-adjacent. **`--regenerate` semantics (H-FieldOp-4):** regenerate today's schedule for all stations (or `--regenerate=<station>`), write, and **exit** (oneshot tool, not live) — the running daemon is unaffected; a live daemon picks up a manual regen only on its next day-roll or a restart (documented).
+- `systemd/pirate-radio.service`: `Type=simple`, `Restart=on-failure`, `RestartSec=2`, **`StartLimitIntervalSec`/`StartLimitBurst`** (terminal `failed` instead of thrash, C2), `After=network-online.target time-sync.target` + `Wants=network-online.target`, `EnvironmentFile=` (root-owned 0600 secrets). **NO `WatchdogSec`** in v1 (a real `sd_notify` heartbeat is a documented optional upgrade). The daemon **tolerates a not-yet-present device / LAN at boot** (resolution retry + degrade-to-backstop, don't crash).
+- `docs/ops/first-boot.md`: the ordered runbook — deploy venv, `apt install libportaudio2`, write `/etc/pirate-radio/secrets.env` (0600), install+verify udev rules per dongle, lay down `config.json` (from `config.example.json`), `systemctl enable --now`, confirm "N/N ON AIR" in journald. Plus the 24/7 appliance requirements (active cooling, SSD boot, official PSU, powered USB hub).
 
-Parallelizable: P4-1, P4-2, P4-3 independent. P4-4 feeds P4-5. P4-5→P4-6→P4-7 chain. P4-8 depends on P4-6. P4-9 last.
+## Increment Breakdown (dependency-ordered; strict spec-driven TDD)
+
+- **P4-1 — `audio/sink.py` `SoundDeviceSink`** (+ `sounddevice` dep, `libportaudio2` doc). Gate: format coercion + to_thread offload (dedicated executor) + persistent-stream lifecycle (close in `finally`) + xrun-is-a-glitch, all with injected `FakeOutputStream`; **only `stream.write` hardware**; **no module-scope `sounddevice` import** test (R21); CI green `-m "not hardware"`.
+- **P4-2 — `UdevAudioDeviceResolver`** + `docs/ops/udev-audio.md`. Gate: name→PortId **port-path** keying + PortAudio↔ALSA bridge unit-tested with a fake modelling both namespaces; only enumeration hardware; `StaticAudioDeviceResolver` still the CI resolver.
+- **P4-3 — `supervisor.py`** (R7 tier-2) + secret-scrub + `status.py`. Gate: crash-on-Nth restart count, backoff via `VirtualSleeper`, sibling isolation, **advance-past-poison after K identical-offset crashes**, crash-loop ceiling → **injected `on_escalate`** (not real exit); R6 corruption→regenerate **through** the restart path; scrubbed logs; `StationStatus` transitions asserted.
+- **P4-4 — `pipeline/daily.py`** (slice + seek-guard + gap) + `recent_tracks` param threading. Gate: `slice_from_now` across now-inside-item (R12 seek), now-in-gap (R11 silence + next), now-before-first, now-past-end; **seek `offset_frames >= decoded.frames` → skip-to-next** (not empty→backstop); **gap silence asserted at the station format** (H-QA-2); `recent_tracks` look-ahead-ordered semantics pinned; virtual time only.
+- **P4-5 — `station.py`** (load-or-generate + resume + day loop + StationStatus updates). Gate: first-start generates+persists; load; corruption→regenerate not crash-loop (R6); mid-day resume re-anchors (R12); day-roll re-slices on the Event; status transitions; full fakes.
+- **P4-5b — `item_kind` Protocol removal** (its own increment, 8 sites). Gate: `patter(context)` green across `protocols.py` + the `failover.py` lambda + 3 backends + 2 fakes + the producer caller; mypy `--strict` clean.
+- **P4-6 — `coordinator.py`** (shared services, DJ inputs, §A budget, status registry, actual-rate). Gate: shared-LLM reuse asserted (§5.1); real persona/station/recent_tracks supplied; **look-ahead depth = worst consecutive patter +1**, RAM-clamped, **stagger offsets** assigned; worst-case render a PURE fn with **named constants**; startup WARNING (caplog) for the irreducible residual + the RAM clamp; first-segment actual-rate assert; injected `sink_factory`, no hardware.
+- **P4-7 — `midnight.py`** (sleep + per-station isolated regen, DST, straddle). Gate: `next_midnight` DST spring/fall; `run` sleeps computed seconds (`VirtualSleeper`), regenerates+persists+signals **file-then-event**; **regen failure isolated + non-fatal** (other stations + today's schedule survive); **straddle-midnight** item aired uncut then re-sliced (FakeAudioSink recorded the FULL in-flight buffer — positive assertion, H-QA-1); zero wall-clock.
+- **P4-8 — `systemd/pirate-radio.service` + `__main__.py` + `logging_setup.py` + `docs/ops/first-boot.md`** (R7 tier-1, CF6). Gate: unit has `Type=simple`/`Restart=on-failure`/`RestartSec`/`StartLimit*`/`After=network-online+time-sync`/`EnvironmentFile=` and **no `WatchdogSec`**; the operator log vocabulary asserted (caplog); `main(argv, *, deps)` tested with fakes (logging before config); `--regenerate` oneshot path; first-boot runbook present.
+- **P4-9 — housekeeping (fall-through WARNING de-dup) + Phase-4 deep-dive.** Gate: WARNING de-dup asserted (caplog); full-seven deep-dive CONFIRM, no CRITICAL/HIGH; phase-gate numbers + uncovered-lines audit (pragma+thin-seam, not just %).
+
+Parallelizable: P4-1, P4-2, P4-3 independent. P4-4 feeds P4-5/P4-5b. P4-5→P4-6→P4-7 chain. P4-8 depends on P4-6. P4-9 last.
 
 ## §21 Resolutions: Implemented vs Deferred
+**Implemented:** R7 (P4-3+P4-8), R10/A2 (P4-2), R11 (§A depth + shipped backstop/gap), R18 (P4-5/P4-7), R20 (P4-1/P4-2), R21 (every gate + lazy-import guards), R6 (P4-3/P4-5), R9/D6 (P4-7), A6/A7 (state_dir, low-freq writes), R8′ (P4-8 logging). **Reused:** R5, R12, R15/R16/R17, R19, H4/H5/H14. **Deferred (rationale):** R13 player-subprocess → systemd tier; R8′ `GET /logs` + R23 non-blocking handlers + D4 control API → Phase 6 (only the in-memory `StationStatus` is pre-built, no HTTP); §7-Q5 rate limiting → reserved; SIGHUP reload → restart in v1.
 
-**Implemented:** R7 (P4-3+P4-8), R10/A2 (P4-2), R11 (P4-6 budget + shipped backstop/gap), R18 (P4-5/P4-7), R20 (P4-1/P4-2), R21 (every gate), R6 (P4-5), R9/D6 (P4-7), A6 (state_dir), R8′ (P4-8 logging).
-**Carried, reused:** R5, R12, R15/R16/R17, R19, H4/H5/H14.
-**Deferred (rationale):** R13 (player subprocess → systemd tier instead); R8′ `GET /logs` + R23 non-blocking handlers → Phase 6; D4 control API → Phase 6; §7-Q5 rate limiting → reserved.
+## Open Questions — RESOLVED (Rev 2)
+All Rev-1 Q1–Q10 are ruled and folded (see changelog item 11). Remaining genuinely-open item for the panel: **§A's RAM-budget fraction + the stagger step** are tunable constants — confirm the defaults (≤40% RAM for look-ahead; `stagger_step ≈ 2s × station_index`) or set them.
 
-## Open Questions for the Panel
+## Risks & Hardening (continued)
+- **H21** native SIGSEGV → systemd tier-1 `Restart` (no `WatchdogSec` footgun); supervisor documents it can't catch it.
+- **H22** worst-case render stall → §A depth masks clusters during tracks; irreducible residual (cold start / patter-opening block) → R11 backstop for one render + startup WARNING. No sustained loop.
+- **H23** device reorder → R10 **port-path** udev (P4-2) + config-load distinct-PortId (shipped) + `docs/ops` verify.
+- **H24** DST fold → `next_midnight` via `zoneinfo`, explicit spring/fall tests.
+- **H25** midnight race → regen writes next file + flips signal (file-then-event), never cancels run_once; straddle splices at end-of-item; **regen failure per-station isolated**.
+- **H26** state_dir on slow SD → A6/A7 (off boot SD, low-freq).
+- **H27** shared client contention / RAM → §A RAM ceiling + dedicated sink executor + stagger; reactive failover.
+- **H28** poison item → supervisor advance-past after K crashes + systemd `StartLimit*` (no global thrash).
+- **H29** xrun on a contended Pi → explicit `blocksize`/`latency` + xrun-is-a-glitch (logged, in-stream recovery).
 
-1. **Seek-into-first-item:** `run_once` `first_offset_seconds` vs trim in `daily.play_day`. Rec: trim in `daily.play_day`.
-2. **Day-roll handoff:** poll `find_now` vs an `asyncio.Event` from the midnight task. Rec: `asyncio.Event`.
-3. **recent_tracks recording point:** Player (air-accurate, frozen file) vs `daily.play_day` (look-ahead, no churn). Rec: `daily.play_day`.
-4. **DjContext assembly location:** move `build_dj_context` to coordinator vs leave it + coordinator owns inputs. Rec: leave it.
-5. **Refill-budget enforcement:** cap per-call timeouts vs R11 backstop coverage + startup WARNING. Rec: WARNING + coverage.
-6. **Phase-6 status surface:** how much in-memory station status to pre-build now (no HTTP)?
-7. **Actual-rate verification:** construction-from-one-source vs + an explicit first-buffer assert. Rec: both.
-8. **Supervisor crash-loop escalation:** restart ceiling + exit-for-systemd vs restart-in-process indefinitely?
-9. **Sink gapless strategy:** persistent `sd.OutputStream` vs per-buffer `sd.play`/`sd.wait`. Rec: persistent stream.
-10. **Entrypoint module path:** `python -m pirate_radio` (`src/pirate_radio/__main__.py`) — confirm.
-
-## Risks & Hardening (H-series continued)
-
-- **H21** native SIGSEGV in PortAudio → R7 tier-1 systemd `Restart`/`WatchdogSec`; in-process supervisor documents it cannot catch this (risk accepted, §5.4/R13).
-- **H22** worst-case render stall → audible backstop, not dead air → P4-6 states/bounds the budget; startup WARNING when > shortest item.
-- **H23** device reorder across reboots → R10 udev rules (P4-2) + config-load distinct-PortId enforcement (shipped); `docs/ops/udev-audio.md`.
-- **H24** DST fold double/zero midnight → `next_midnight` via `zoneinfo` (P4-7), explicit spring/fall tests.
-- **H25** midnight regen racing the in-flight segment → regen writes only the next file + flips a signal; never cancels the running `run_once`; splice at end-of-day (§8.6).
-- **H26** state_dir on slow/unsafe SD → A6 (off boot SD, validated) + low-frequency writes only (A7).
-- **H27** shared LLM/TTS client contention across N stations → shared chains built once (§5.1); reactive failover; `max_requests_per_minute` reserved.
-
-## Success Criteria (Phase Gate — full-seven review)
-
-- [ ] N stations run concurrently from one daemon, each on its own distinct physical device (R10), gapless (§10), R11 backstop intact.
-- [ ] Each station: first-start generates+persists; restart resumes mid-day at the correct broadcast point (R6/R12); end-of-day re-slices.
-- [ ] In-process supervisor restarts a crashed station to known-good state without affecting siblings (R7 tier 2); systemd unit owns the process + recovers SIGSEGV (R7 tier 1).
-- [ ] Midnight task regenerates DST-correctly (R18/R9), re-reads grids, does **not** interrupt the in-flight segment (§8.6).
-- [ ] `SoundDeviceSink` behind the unchanged `AudioSink` Protocol; **only** the literal `sounddevice` write is `@pytest.mark.hardware`/`pragma` (R20); CI green `-m "not hardware"`.
-- [ ] Worst-case refill budget computed, stated, bounded; startup WARNING when it exceeds the shortest schedulable item (CF2).
-- [ ] Coordinator wires decoder+TTS+backstop from one station format and guarantees actual-rate agreement (0022/0032 closed).
-- [ ] `__main__.py` configures logging before the coordinator starts (CF6); systemd unit + udev recipe shipped.
-- [ ] All CF (1–6) addressed; `item_kind` Protocol param removed; fall-through WARNING de-dup; secret-scrub; tag-length cap.
-- [ ] Gate: ruff + ruff-format + mypy `--strict` clean; pytest green `-m "not hardware and not network"`; `--cov-fail-under=80` package-wide (R20); per-increment decision records + BUILD-LOG updated; full-seven deep-dive CONFIRM, no CRITICAL/HIGH.
+## Success Criteria (Phase Gate — full-seven)
+- [ ] N stations run from one daemon, each on its own distinct physical device (R10), gapless (§10), R11 intact.
+- [ ] Each station: first-start generates+persists; restart resumes mid-day (R6/R12); end-of-day re-slices; **a render-poison item is skipped after K crashes, never an infinite loop**.
+- [ ] In-process supervisor restarts to known-good without affecting siblings (R7 t2); systemd owns the process + `StartLimit*` terminal-fails instead of thrashing (R7 t1); **no `WatchdogSec` reboot loop**.
+- [ ] Midnight regen DST-correct (R18/R9), per-station isolated (a bad tomorrow-grid doesn't kill today), in-flight segment uncut (§8.6, positive "aired in full" assertion); straddle-midnight specified.
+- [ ] `SoundDeviceSink` behind the unchanged `AudioSink`; only the `sounddevice` write is hardware (R20); lazy import (R21); `libportaudio2` documented.
+- [ ] **C1 fixed:** look-ahead depth (worst consecutive patter), RAM-clamped, staggered — no sustained backstop-loop on patter clusters; irreducible residual bounded to one render + WARNING.
+- [ ] Operability: minimal `StationStatus` + periodic "N/N ON AIR" summary; operator log vocabulary asserted; first-boot runbook + port-path udev recipe shipped.
+- [ ] `recent_tracks` threaded (honest churn, default `()`); `item_kind` Protocol param removed.
+- [ ] Gate: ruff + ruff-format + mypy `--strict` clean; pytest green `-m "not hardware and not network"`; `--cov-fail-under=80` (R20); per-increment records + BUILD-LOG; full-seven deep-dive CONFIRM, no CRITICAL/HIGH.
