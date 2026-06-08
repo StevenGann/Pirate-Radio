@@ -62,7 +62,12 @@ virtual-time/Sleeper-seam contract (P2) nailed. All committed; resume is lossles
 ### Phase 5 — Offline tagging tool  — NOT STARTED
 ### Phase 6 — Control API (FastAPI, in v1 per D4)  — NOT STARTED
 
-### Final — full-team deep-dive code-quality + documentation review  — NOT STARTED
+### Final — deep-dive code-quality + documentation review  — MANAGER-LED (team validation pending)
+- Manager-led pass `0010` (full team blocked by a transient provider rate-limit).
+  No CRITICAL/HIGH code defects; A4/R5/R6/R10/A2/R14-R17/D6 spot-verified in code.
+  Fixed HIGH: stale README rewritten. Fixed MEDIUM: strict-tdd.md focused-panel note.
+  Carry-forward: loudness_target_lufs bound (Phase 2); design-doc §6/§8.4 corrections
+  (when resume/generator land). Re-run full team staggered once throttle clears.
 
 ## Notes
 - Quality gate as of grid: ruff clean, mypy clean (10 files), 101 tests, 98.30% cov.

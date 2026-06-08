@@ -1,42 +1,60 @@
-# Pirate Radio
+# PiRate Radio
 
-A Raspberry Pi + Python project. The design document is pending; this repository
-currently contains project infrastructure only.
+A Raspberry Pi + Python project: an automated, multi-station FM radio broadcaster
+with an optional AI DJ. See [`PiRate_Radio_Design_Doc.md`](PiRate_Radio_Design_Doc.md)
+for the full design (the panel-adopted §21 "Review Resolutions" govern).
 
 ## Status
 
-🚧 **Infrastructure setup.** No application code yet — awaiting the design doc.
+🚧 **In active construction (Phase 1).** **Not yet a deployable radio** — there is no
+coordinator/supervisor, no midnight-regeneration loop, and no audio output wired yet
+(those land in later phases). What exists today is the validated foundation:
+
+- **Phase 0 — complete:** config + fail-fast validation, content catalog scanner,
+  grid loader + validation, atomic durable JSON state, clock seam, error taxonomy,
+  the R10 audio-device-resolution seam.
+- **Phase 1 — in progress:** schedule data models, the `AudioBuffer` type, the
+  provider-error taxonomy, and the DJ/audio Protocol seams + Phase-1 fakes.
+  Remaining: schedule generator, `find_now`/resume, the look-ahead pipeline.
+
+Live status and the resume point are in [`docs/BUILD-LOG.md`](docs/BUILD-LOG.md).
 
 ## Development
 
-Requires Python 3.11+ (matches Raspberry Pi OS Bookworm's system Python).
+Requires **Python 3.11+**. The runtime targets **64-bit Raspberry Pi OS (arm64)
+Bookworm** — `numpy` has no 32-bit (armhf) wheel, so a 32-bit image triggers a slow
+source build. Runtime deps: `pydantic`, `mutagen`, `PyYAML`, `numpy`.
 
 ```bash
-# Create a virtual environment and install dev tooling
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 
-# Run the quality gate locally (mirrors CI)
+# Quality gate (mirrors CI)
 ruff check .
 ruff format --check .
 mypy
 pytest -m "not hardware"
 ```
 
+Current gate: ruff + mypy clean, **186 tests**, ~98% coverage.
+
 ### Testing philosophy
 
-We follow a TDD workflow. Tests run on every push and PR via GitHub Actions
-(`.github/workflows/ci.yml`) against Python 3.11 and 3.12, with an enforced
-**80% coverage floor**.
+Strict **spec-driven TDD**: tests are authored from the spec and **reviewed by the
+agent panel before any implementation exists**, then code is written to pass them
+(see [`docs/process/strict-tdd.md`](docs/process/strict-tdd.md)). CI runs on Python
+3.11 and 3.12 with an enforced **80% coverage floor**.
 
-Because CI has no Raspberry Pi hardware, hardware-dependent tests are marked
-`@pytest.mark.hardware` and excluded from the CI run. All hardware access must
-sit behind an abstraction layer so the bulk of the code is testable on any
-machine. See `docs/agents/qa-engineer.md`.
+Hardware-dependent code (the real `SoundDeviceSink`, the udev device resolver) sits
+behind Protocol seams and is marked `@pytest.mark.hardware`, excluded from CI, so the
+logic is fully testable on any machine with fakes.
 
 ## Project governance
 
-Development decisions are reviewed by a standing panel of specialist review
-agents coordinated through a structured brief → distill → vote workflow. See
-[`docs/agents/README.md`](docs/agents/README.md).
+Design and implementation decisions are made by a standing seven-agent review panel
+(brief → distill → vote) coordinated through a manager loop. The full audit trail —
+design review, per-phase plans, and per-increment votes — is in
+[`docs/decisions/`](docs/decisions/) (`0001`–`0010`) and
+[`docs/agents/README.md`](docs/agents/README.md). Implementation plans live in
+[`docs/plans/`](docs/plans/).

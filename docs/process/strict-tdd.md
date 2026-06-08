@@ -38,3 +38,8 @@
   see the Phase 0 amendments A5).
 - Applies to bug fixes too: a bug fix starts with a failing test that reproduces
   the bug, reviewed, then the fix.
+- **Panel size.** Plans, phase-gates, and the final deep-dive use the **full seven**.
+  Routine per-increment test reviews may use a **focused panel** — QA + Senior Dev +
+  Devil's Advocate (the highest-signal reviewers for test quality) — to keep
+  throughput up; the increment's commit/BUILD-LOG records which panel reviewed it.
+  Any agent may still be pulled in when an increment touches their lane.
