@@ -237,6 +237,20 @@ async def test_empty_patter_falls_back_to_template_with_warning(caplog) -> None:
     assert any("template fallback" in r.message for r in caplog.records)  # Field-Op visibility
 
 
+async def test_empty_patter_warning_is_deduped_per_kind(caplog) -> None:
+    # P4-9 housekeeping: a NullDJ floor empties EVERY patter item; the template-fallback WARN must
+    # fire ONCE PER KIND, not once per item, or it floods journald on a degraded daemon (Field-Op).
+    tts = _RecordingTTS()
+    buf = LookAheadBuffer(maxsize=20)
+    chain = RankedTextGenerator([NullDJ()])
+    items = [_id_item(), _id_item(), _id_item(), _reminder_item(), _reminder_item()]
+    with caplog.at_level(logging.WARNING):
+        await _producer(items, tts=tts, text_generator=chain, buf=buf).run()
+    fallbacks = [r for r in caplog.records if "template fallback" in r.message]
+    assert len(fallbacks) == 2  # one for station_id, one for block_reminder (NOT five)
+    assert tts.spoken == [announcement_text(i) for i in items]  # every item STILL gets its template
+
+
 async def test_default_text_generator_is_nulldj_floor() -> None:
     # Producer with no text_generator -> a NullDJ-only ranked floor -> empty patter -> template
     tts = _RecordingTTS()

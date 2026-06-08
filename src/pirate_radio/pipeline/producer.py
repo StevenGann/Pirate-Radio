@@ -136,6 +136,9 @@ class Producer:
         # rolling recent-track history (look-ahead-ordered: appended as each TrackItem is rendered,
         # which is schedule order, so a patter item sees the tracks scheduled before it — §9.2/Q3).
         self._recent: deque[TrackMeta] = deque(maxlen=_RECENT_TRACKS_MAXLEN)
+        # de-dup the empty-patter degrade WARNING to once per kind (a NullDJ floor or a persistent
+        # chain outage would otherwise log it on every patter item — a journald flood, P4-9).
+        self._warned_empty_patter: set[str] = set()
 
     async def run(self) -> None:
         for item in self._items:
@@ -190,9 +193,13 @@ class Producer:
         )
         text = await self._dj.patter(ctx)  # ranked LLM chain; NullDJ floor -> ""
         if not text.strip():  # §9.3 floor: degrade to the Phase-1 template line
-            logger.warning(  # Field-Op: operator visibility on the degrade
-                "dj patter empty for %s item -> template fallback (NullDJ/empty-chain floor)",
-                item.kind,
-            )
+            if item.kind not in self._warned_empty_patter:  # de-dup: once per kind, not per item
+                logger.warning(  # Field-Op visibility on the degrade (de-duped, not a flood)
+                    "dj patter empty for %s item -> template fallback (NullDJ/empty-chain floor); "
+                    "further %s degrades this run are suppressed",
+                    item.kind,
+                    item.kind,
+                )
+                self._warned_empty_patter.add(item.kind)
             text = announcement_text(item)
         return await self._tts.synthesize(text)  # ranked TTS chain; any escape -> R11 backstop
