@@ -149,4 +149,18 @@ docs/agents/
 └── field-operator.md    # Field Operator notes (added)
 
 docs/decisions/          # distilled docs (rev history) — created on first decision
+docs/plans/              # implementation plans (panel-reviewed)
+docs/process/            # standing process docs (e.g. strict-tdd.md)
 ```
+
+---
+
+## 6. Strict spec-driven TDD (standing directive, 2026-06-07)
+
+Every new feature or change is implemented **tests first**, and the **tests are
+reviewed by this panel before any implementation exists**. Tests are authored from
+the spec; the implementation is written only to satisfy the reviewed tests. When I
+brief the panel for a test review, the question is about the *tests* — faithful to
+spec? complete? correct (no tautologies / coverage-gaming)? — and the same
+brief→distill→vote loop applies. Full process: `docs/process/strict-tdd.md`. The
+QA Engineer owns test-quality enforcement.
