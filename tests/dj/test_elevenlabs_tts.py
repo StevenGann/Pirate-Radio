@@ -141,7 +141,7 @@ async def test_elevenlabs_401_is_fatal(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 async def test_elevenlabs_429_is_quota(monkeypatch: pytest.MonkeyPatch) -> None:
-    # §3.4/§6 gate row: 429 -> QuotaExceeded (distinct from other-4xx Fatal); a 429->Fatal impl fails
+    # §3.4/§6 gate row: 429 -> QuotaExceeded (distinct from other-4xx Fatal); 429->Fatal impl fails
     _install_fake_httpx(monkeypatch, _FakeClient(resp=_FakeResp(status_code=429, text="slow")))
     with pytest.raises(ProviderQuotaExceeded):
         await ElevenLabsTTS(cfg=_CFG, provider=_PROV, api_key="k").synthesize("hi")

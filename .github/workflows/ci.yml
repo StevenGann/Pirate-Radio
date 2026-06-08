@@ -49,8 +49,8 @@ jobs:
       - name: Type check (mypy)
         run: mypy
 
-      - name: Test (pytest + coverage, hardware tests excluded)
-        run: pytest -m "not hardware"
+      - name: Test (pytest + coverage; hardware + live-network tests excluded)
+        run: pytest -m "not hardware and not network"
 
       - name: Upload coverage artifact
         if: always()

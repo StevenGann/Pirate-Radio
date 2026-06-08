@@ -127,7 +127,7 @@ virtual-time/Sleeper-seam contract (P2) nailed. All committed; resume is lossles
   run_once can't verify decoder/TTS *actual* rate vs declared (coordinator's job). Still NOT a
   deployable radio (no coordinator/supervisor/midnight-regen/systemd/real-sink; AI DJ + ranked
   failover + ElevenLabs = Phase 3).
-### Phase 3 — AI DJ (LLM patter, ranked failover)  — PLAN ADOPTED (building)
+### Phase 3 — AI DJ (LLM patter, ranked failover)  — ✅ COMPLETE
 - **Plan adopted 2026-06-08, 7 AYE / 0 NAY** after one revision round (Rev 1 → Rev 2 under the
   ≥2-NAY charter). Plan: `docs/plans/phase-3-implementation-plan.md`; vote + must-fix audit trail:
   `docs/decisions/0023-phase3-plan-adopted.md`.
@@ -154,9 +154,25 @@ virtual-time/Sleeper-seam contract (P2) nailed. All committed; resume is lossles
 - **P3-5 ✅** `dj/_http.py` + `dj/text.py` (Claude/DeepSeek/Ollama; anthropic pinned 0.107; R21
   positive import-guard + ast guard; real to_thread offload; H22 backend secret tests) — `0028`.
   Deps added: `anthropic>=0.107,<1`, `httpx>=0.27,<1`; new `network` marker (env-gated live smokes).
-- Gate after P3-5: **507 tests** (3 network smokes skip, 2 hardware), 98.69% cov, ruff/mypy clean.
-- **RESUME POINT: start P3-6 tests-first** — `ElevenLabsTTS` (mirror Piper, D5) + cloud-credential
-  preflight (0010 cloud half) + Ollama endpoint shape validation in `config.py`.
+- **P3-6 ✅** `ElevenLabsTTS` (D5, mirror Piper) + cloud-credential preflight + Ollama endpoint
+  shape (`config.py`). DA caught a repeat P2-5 bug class (PCM golden tol 1e-3→1e-7) — `0029`.
+- **P3-7 ✅** `dj/build.py` boot seam (ranked chains from config; NullDJ floor last; total
+  build_tts_engine; `LLMConfig.request_timeout_seconds` + config→ctor timeout threading; H22) — `0030`.
+- **P3-8 ✅** producer wiring (`build_dj_context`; every TrackItem decodes; empty patter→template
+  + WARNING; R11 backstop intact; run_once back-compat defaults). Senior caught empty-sentinel
+  ValidationError bypassing R11 (→ non-empty sentinels) — `0031`.
+- **PHASE 3 COMPLETE.** The AI DJ ships: grounded LLM patter (Claude/DeepSeek/Ollama), ranked
+  LLM+TTS failover (skip-on-Fatal, total floor), ElevenLabs cloud TTS, boot seam, producer wiring —
+  all behind the unchanged Phase-1 Protocols, fakes-only on CI (R21, lazy network imports).
+- Gate after P3-8: **566 tests** (3 network smokes + 2 hardware deselected), 98.65% cov,
+  ruff/mypy `--strict` clean (38 files). Deps: `anthropic>=0.107,<1`, `httpx>=0.27,<1`.
+- README updated (Phase-3 prereqs: env creds, Ollama-on-LAN, spend cap, _MAX_TOKENS, timeouts);
+  CI excludes `network` marker; governance refs 0001–0031.
+- **Phase-4 carry-forwards (opened during Phase 3):** summed-timeout refill budget (DA); repeated
+  fall-through WARNING de-dup (Old Man); the run_once DJ-arg signature should migrate to a Phase-4
+  coordinator that owns DjContext assembly (§7-Q4); decoder/TTS *actual*-rate verification (0022).
+- **RESUME POINT: Phase-3 full-team deep-dive (code quality + documentation) — overnight mandate
+  finale.** Then Phase 4 (coordinator/supervisor/systemd/real sink/midnight regen) needs a plan.
 ### Phase 4 — Multi-station (supervisor, systemd)  — NOT STARTED
 ### Phase 5 — Offline tagging tool  — NOT STARTED
 ### Phase 6 — Control API (FastAPI, in v1 per D4)  — NOT STARTED
