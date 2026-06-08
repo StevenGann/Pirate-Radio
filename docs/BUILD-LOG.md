@@ -182,8 +182,21 @@ virtual-time/Sleeper-seam contract (P2) nailed. All committed; resume is lossles
 - **Deferred to Phase 4 (noted, not defects):** `item_kind` redundant Protocol param; raw-exception
   secret-scrub (defense-in-depth); track-tag length cap; worst-case refill budget under outage;
   logging entrypoint; minor coverage-accounting nits.
-- **RESUME POINT: Phase 4** (coordinator/supervisor/systemd/real sink/midnight regen) — needs a plan
-  (planner + full-seven panel) the way Phases 0–3 were.
+### Phase 4 — Multi-station (coordinator/supervisor/systemd/real sink/midnight regen) — PLAN IN REVIEW
+- **Plan Rev 1 drafted** (`docs/plans/phase-4-implementation-plan.md`) + full-seven panel reviewed:
+  **5 AYE / 2 NAY → REVISE** (`0033`). Fact Checker verified every seam symbol (no corrections).
+- **Adopt-blocking CRITICALs for Rev 2 (full brief in `0033`):** (C1, DA) the "refill budget"
+  documents rather than fixes the serial-render-vs-short-patter-cluster **audible backstop-loop** —
+  needs a hard config-load invariant (Σ patter timeouts < shortest patter item) and/or pre-render
+  the patter run at block entry (converges w/ RPi "stagger patter" + RAM budget); (C2, DA+FieldOp)
+  **render-poison crash-loop** globalized by escalation — supervisor must advance past the poison item
+  + systemd `StartLimit*`; (RPi) `sounddevice` needs system `libportaudio2` (apt); `WatchdogSec`
+  without `sd_notify` bricks the box → drop or wire heartbeat; `After=sound.target`→`network-online`
+  +device-retry. **HIGH:** midnight regen-fail isolation + straddle-midnight flow; seek offset-past-
+  decoded-frames guard; udev PHYSICAL-PORT-PATH keying; RAM-aware budget; operator log vocabulary +
+  StationStatus + first-boot runbook; recent_tracks/item_kind are real churn (correct the framing).
+- **RESUME POINT: author Phase-4 plan Rev 2 folding `0033`, then re-dispatch the full-seven re-vote.**
+  Then build P4-1..P4-9 strict-TDD. (Phase 3 remains COMPLETE + deep-dive-validated.)
 ### Phase 4 — Multi-station (supervisor, systemd)  — NOT STARTED
 ### Phase 5 — Offline tagging tool  — NOT STARTED
 ### Phase 6 — Control API (FastAPI, in v1 per D4)  — NOT STARTED
