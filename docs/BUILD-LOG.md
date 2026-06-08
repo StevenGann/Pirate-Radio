@@ -30,6 +30,27 @@ code-quality + documentation review. See memory `overnight-autonomous-build`.
 - [x] P1-3 dj/protocols+fakes (TextGenerator/TTSEngine/AudioSink + NullDJ/StubTTS/FakeAudioSink) + audio/decode (Decoder/FakeDecoder) — 2-1 (DA NAY on coverage-gaming, fixed: parametrized exact-duration + non-trivial wpm + silent assert). pytest-asyncio. 186 tests, 98.25%. (FailingTTS/FailingDecoder + SoundDeviceSink → later increments)
 - [ ] P1-4 `schedule/generator.py` (R19, P3 boundary, H1) · P1-5 `schedule/resume.py` (find_now R11/R12, P6, H4)
 - [ ] P1-6 `pipeline/` (P1 no-drop, P2 Sleeper-seam, R21) · P1-7 config state_dir (A6) · P1-8 catalog cache (A9)
+
+#### Resume handoff (paused mid-Phase-1)
+Paused before P1-4 deliberately: the generator's `_transition` / `_slot_boundary` /
+`_bind` helpers were elided in the plan and need real design decisions (best made
+fresh, not improvised at the end of a long session); the pipeline (P1-6) needs the
+virtual-time/Sleeper-seam contract (P2) nailed. All committed; resume is lossless.
+
+**Settle these in P1-4 before implementing:**
+- `_slot_boundary`: roll `Slot.end == time(0,0)` to **next-day midnight** (P3) — else
+  the final block computes a negative span and emits zero tracks. RED test: PM block
+  of a `00:00→12:00 / 12:00→00:00` grid fills.
+- `_transition`: a `block_transition` at each slot start (§8.4.1) — decide closing
+  (`block_name`=prior slot) vs opening (`next_block_name`/`next_block_starts_at`=this
+  slot); handle slot 0 (no prior). Pin via observable-field tests.
+- H1 name `station_id` 5.0s / `block_reminder` 8.0s / `0.05` down-weight as constants.
+  H2 document repeat_window = soft down-weight (a recent track CAN repeat). H3
+  `groups[slot.group]` → typed `PirateRadioError` when a grid group is absent.
+- Test with a **synthetic Catalog** (build `Track(...)` with long durations directly —
+  no real file needed) so a 24h schedule is ~dozens of items, fast + deterministic.
+  R19/P5: two-run `model_dump_json` identical + persist→load→regenerate identical
+  (reuse `persistence.atomic_write_json`); committed golden JSON can land with P1-5.
 - NOTE: Phase 1 is NOT a deployable radio (no coordinator/supervisor/midnight-regen
   /systemd — those land in Phase 4). Per-increment reviews may use a focused panel
   (QA + Senior Dev + Devil's Advocate, the highest-signal for test quality) given
