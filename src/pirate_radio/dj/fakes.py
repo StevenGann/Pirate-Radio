@@ -89,10 +89,23 @@ class FailingTTS:
 
 
 class FakeAudioSink:
-    """Records every played buffer; pipeline tests assert ordering + totals (R21)."""
+    """Records every played buffer; pipeline tests assert ordering + totals (R21).
+
+    An async context manager like the real ``SoundDeviceSink`` (whose ``__aenter__`` starts the
+    stream), so a Station/coordinator that drives ``async with sink:`` works against the fake too —
+    ``entered``/``exited`` let a test assert the lifecycle was honoured (deep-dive CRITICAL)."""
 
     def __init__(self) -> None:
         self.played: list[AudioBuffer] = []
+        self.entered = False
+        self.exited = False
+
+    async def __aenter__(self) -> FakeAudioSink:
+        self.entered = True
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        self.exited = True
 
     async def play(self, buf: AudioBuffer) -> None:
         self.played.append(buf)

@@ -17,6 +17,7 @@ import pytest
 from pirate_radio.audio_devices import (
     AudioDevice,
     AudioDeviceResolver,
+    PortId,
     StaticAudioDeviceResolver,
     UdevAudioDeviceResolver,
 )
@@ -163,6 +164,30 @@ def test_udev_device_index_bridges_to_portaudio() -> None:
     )
     assert r.device_index("pirate2") == 7
     assert r.device_index("nope") is None
+
+
+def test_udev_device_index_for_port_translates_the_stable_portid() -> None:
+    # deep-dive HIGH: the prod sink_factory gets a PortId (port path); the sink opens by INDEX, so
+    # the resolver must translate PortId -> PortAudio index (NOT pass the sysfs path to PortAudio).
+    r = _udev(
+        [
+            AudioDevice(name="pirate1", port_path="usb-1.2", index=3),
+            AudioDevice(name="pirate2", port_path="usb-1.3", index=7),
+        ]
+    )
+    assert r.device_index_for_port(PortId("usb-1.3")) == 7
+    assert r.device_index_for_port(PortId("usb-9.9")) is None  # gone since resolution
+
+
+def test_udev_device_index_for_port_none_when_ambiguous() -> None:
+    # same port path across two indices (a broken enumeration) -> None, never the wrong device
+    r = _udev(
+        [
+            AudioDevice(name="a", port_path="usb-1.2", index=3),
+            AudioDevice(name="b", port_path="usb-1.2", index=9),
+        ]
+    )
+    assert r.device_index_for_port(PortId("usb-1.2")) is None
 
 
 def test_udev_resolver_satisfies_protocol() -> None:

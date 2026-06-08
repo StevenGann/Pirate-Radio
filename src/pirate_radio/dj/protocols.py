@@ -43,7 +43,14 @@ class TTSEngine(Protocol):
 class AudioSink(Protocol):
     """Play one ``AudioBuffer`` to completion, gaplessly after the previous call (§10).
 
-    Awaiting ``play`` returns only when the buffer has been fully consumed.
+    Awaiting ``play`` returns only when the buffer has been fully consumed. The sink is an async
+    context manager: ``__aenter__`` opens the device/stream (the real ``SoundDeviceSink`` starts its
+    persistent stream there), ``__aexit__`` tears it down — the station enters it once for its whole
+    lifetime, so ``play`` is only ever called on an open stream (deep-dive CRITICAL).
     """
+
+    async def __aenter__(self) -> AudioSink: ...
+
+    async def __aexit__(self, *exc: object) -> None: ...
 
     async def play(self, buf: AudioBuffer) -> None: ...

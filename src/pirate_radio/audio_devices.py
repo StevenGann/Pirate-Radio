@@ -89,6 +89,16 @@ class UdevAudioDeviceResolver:
         device = self._unique(name)
         return device.index if device is not None else None
 
+    def device_index_for_port(self, port_id: PortId) -> int | None:
+        """The PortAudio **device index** for a resolved ``PortId`` (port path). The sink opens by
+        index, NOT by the sysfs port path — the prod ``sink_factory`` receives the stable ``PortId``
+        (R10 identity) and must translate it here; passing the port path to PortAudio would fail.
+        None if no enumerated device has that port path (or it is ambiguous across indices)."""
+        indices = {d.index for d in self._enumerate() if d.port_path == str(port_id)}
+        if len(indices) != 1:  # 0 = gone since resolution, >1 = ambiguous
+            return None
+        return next(iter(indices))
+
     def _enumerate_hardware(self) -> list[AudioDevice]:  # pragma: no cover (R20: hardware only)
         # Lazy (R21): never imported on the CI path. Enumerate PortAudio output devices, parse the
         # ALSA card id from each, and derive the stable physical port path from sysfs

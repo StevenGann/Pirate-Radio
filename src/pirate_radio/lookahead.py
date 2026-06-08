@@ -38,6 +38,12 @@ _LOOKAHEAD_RAM_BUDGET_BYTES = 1_600_000_000
 # Per-station render-stagger step (H-RPi-3): station i waits ``i * step`` before its first render.
 _STAGGER_STEP_SECONDS = 2.0
 
+# Whole-track buffers resident BEYOND the look-ahead queue's ``depth`` slots, per station: the one
+# segment the player popped and is writing, plus the one the producer has finished and is blocked
+# trying to ``put``. The RAM fail-fast budgets for ``depth + this`` so the boundary is honest, not
+# optimistic by two tracks (deep-dive RPi HIGH).
+_RESIDENT_SLACK_SLOTS = 2
+
 # Worst-case render timeouts (H14 defaults; named with derivation). A hung backend burns its FULL
 # timeout before failover, so the worst single patter render = Σ of every chain backend's timeout.
 # These mirror the config defaults (LLMConfig.request_timeout_seconds=20, DaemonConfig
@@ -106,13 +112,15 @@ def resolve_lookahead_depth(
     ram_budget_bytes: int = _LOOKAHEAD_RAM_BUDGET_BYTES,
     sample_rate: int = DEFAULT_SAMPLE_RATE,
     channels: int = 1,
+    resident_slack: int = _RESIDENT_SLACK_SLOTS,
 ) -> int:
-    """Return ``needed_depth`` if the FIXED RAM budget affords it across all stations, else
-    FAIL-FAST with a ``ConfigError`` naming the fix. A silent clamp-to-affordable is REJECTED: a
-    buffer
-    shallower than the worst cluster cannot pre-render that cluster during the masking track, so C1
-    would silently regress to a sustained backstop-loop. The boundary is inclusive (affordable ==
-    needed just fits)."""
+    """Return ``needed_depth`` if the FIXED RAM budget affords the REAL resident peak across all
+    stations, else FAIL-FAST with a ``ConfigError`` naming the fix. A silent clamp-to-affordable is
+    REJECTED: a buffer shallower than the worst cluster cannot pre-render that cluster during the
+    masking track, so C1 would silently regress to a sustained backstop-loop. The budget must cover
+    ``needed_depth + resident_slack`` whole-track buffers per station — the queue PLUS the in-flight
+    player + producer-blocked segments — not just the queue depth (deep-dive RPi)."""
+    required = needed_depth + resident_slack
     affordable = ram_affordable_depth(
         worst_track_seconds=worst_track_seconds,
         n_stations=n_stations,
@@ -120,13 +128,13 @@ def resolve_lookahead_depth(
         sample_rate=sample_rate,
         channels=channels,
     )
-    if affordable < needed_depth:
+    if affordable < required:
         raise ConfigError(
             f"look-ahead depth {needed_depth} (worst patter cluster + 1) needs {n_stations} × "
-            f"{needed_depth} = {n_stations * needed_depth} whole-track buffers, but the "
-            f"{ram_budget_bytes / 1e9:.1f} GB RAM budget affords only depth {affordable} across "
-            f"{n_stations} stations; reduce the station count, shorten the longest track, or raise "
-            f"the RAM budget"
+            f"{required} = {n_stations * required} whole-track buffers (queue + {resident_slack} "
+            f"resident), but the {ram_budget_bytes / 1e9:.1f} GB RAM budget affords only "
+            f"{affordable} per station; reduce the station count, shorten the longest track, or "
+            f"raise the RAM budget"
         )
     return needed_depth
 

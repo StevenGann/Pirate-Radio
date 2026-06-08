@@ -24,6 +24,7 @@ from collections.abc import Callable, Sequence
 from typing import Protocol, runtime_checkable
 
 from pirate_radio.pipeline.timing import Sleeper
+from pirate_radio.status import StationState, StationStatus
 
 logger = logging.getLogger(__name__)
 
@@ -60,8 +61,9 @@ def scrub_secrets(message: str) -> str:
 
 @runtime_checkable
 class Supervisable(Protocol):
-    """A supervised unit: a ``name`` + an awaitable ``run()``. ``skip_item(index)`` is OPTIONAL
-    (only poison-aware units like ``Station`` implement it)."""
+    """A supervised unit: a ``name`` + an awaitable ``run()``. ``skip_item(index)`` is OPTIONAL —
+    a general advance-past-poison capability for any future unit that raises ``PoisonItemError``;
+    the ``Station`` does NOT implement it (its producer backstops render-poison in-band)."""
 
     name: str
 
@@ -78,6 +80,7 @@ class Supervisor:
         max_consecutive_restarts: int = _DEFAULT_MAX_CONSECUTIVE_RESTARTS,
         poison_threshold: int = _DEFAULT_POISON_THRESHOLD,
         max_skips: int = _DEFAULT_MAX_SKIPS,
+        on_status: Callable[[StationStatus], None] | None = None,
     ) -> None:
         self._sleeper = sleeper
         self._on_escalate = on_escalate
@@ -85,6 +88,11 @@ class Supervisor:
         self._max_consecutive = max_consecutive_restarts
         self._poison_threshold = poison_threshold
         self._max_skips = max_skips
+        self._on_status = on_status  # the coordinator registry: stamp CRASHED/RESTARTING here
+
+    def _status(self, name: str, state: StationState, **kw: object) -> None:
+        if self._on_status is not None:
+            self._on_status(StationStatus(name=name, state=state, **kw))  # type: ignore[arg-type]
 
     async def run(self, units: Sequence[Supervisable]) -> None:
         """Supervise every unit concurrently; a crash/escalation in one never cancels a sibling."""
@@ -131,6 +139,9 @@ class Supervisor:
                     continue
                 # non-poison crash, or a poison item on a unit that cannot skip -> the ceiling path
                 consecutive += 1
+                self._status(
+                    unit.name, StationState.CRASHED, restart_count=consecutive, last_error=scrubbed
+                )
                 logger.warning(
                     "%s: crashed (%s) -> restart %d/%d (R7/§5.4)",
                     unit.name,
@@ -146,4 +157,10 @@ class Supervisor:
                     )
                     self._on_escalate()
                     return
-                await self._sleeper.sleep(self._backoff)
+                self._status(
+                    unit.name,
+                    StationState.RESTARTING,
+                    restart_count=consecutive,
+                    last_error=scrubbed,
+                )
+                await self._sleeper.sleep(self._backoff)  # then re-enter run() (known-good, R6/R12)

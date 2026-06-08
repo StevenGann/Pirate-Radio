@@ -101,6 +101,24 @@ async def test_backoff_sleeps_between_restarts() -> None:
     assert sleeper.slept == [2.5, 2.5]
 
 
+async def test_emits_crashed_and_restarting_status_to_the_registry() -> None:
+    # deep-dive: a crashing station must show CRASHED/RESTARTING in the registry (not stale ON_AIR),
+    # with the restart count + the SCRUBBED cause, so "N/N ON AIR" reflects reality.
+    from pirate_radio.status import StationState
+
+    seen: list[tuple[str, StationState, int, str | None]] = []
+    unit = _Unit("Pi0", crashes=1, exc=RuntimeError("Bearer sk-leak boom"))
+    await Supervisor(
+        sleeper=VirtualSleeper(),
+        on_escalate=lambda: None,
+        max_consecutive_restarts=5,
+        on_status=lambda s: seen.append((s.name, s.state, s.restart_count, s.last_error)),
+    ).run([unit])
+    states = [s for _, s, _, _ in seen]
+    assert StationState.CRASHED in states and StationState.RESTARTING in states
+    assert all("sk-leak" not in (err or "") for *_, err in seen)  # H22: secret scrubbed in status
+
+
 # ---- sibling isolation (incl. true concurrency) --------------------------------------------
 async def test_sibling_isolation_one_crash_does_not_touch_others() -> None:
     crasher = _Unit("crasher", crashes=1)

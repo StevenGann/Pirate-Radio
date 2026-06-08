@@ -55,8 +55,8 @@ NEVER put API keys in `config.json` or the unit file. Put them in the `Environme
 ```
 sudo install -m 0600 -o root -g root /dev/null /etc/pirate-radio/secrets.env
 sudo tee -a /etc/pirate-radio/secrets.env >/dev/null <<'EOF'
-ANTHROPIC_API_KEY=sk-...
-ELEVENLABS_API_KEY=...
+ANTHROPIC_API_KEY=REPLACE_WITH_YOUR_KEY
+ELEVENLABS_API_KEY=REPLACE_WITH_YOUR_KEY
 EOF
 ```
 
@@ -109,8 +109,14 @@ journalctl -u pirate-radio -f
 ```
 
 Watch for, per station, `station <name> starting` then `station <name> on air`, and the periodic
-**`N/N ON AIR`** summary. `N/N` means every station is live. A station stuck on
-`airing_backstop` (vs `on_air`) is alive but airing the bumper — check its LLM/TTS reachability.
+**`N/N ON AIR`** summary. `N/N` means every station is up (a `crashed`/`restarting` station drops the
+count and logs its scrubbed cause). A station that is up but airing the R11 bumper instead of real
+content logs a **station-tagged** `backstop fired` WARNING (or, for a poison item, a `render-poison`
+CRITICAL) — grep those to find a degraded-but-up station and check its LLM/TTS reachability:
+
+```
+journalctl -u pirate-radio | grep -E 'backstop fired|render-poison'
+```
 
 ## Day-to-day
 

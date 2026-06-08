@@ -78,6 +78,7 @@ def _prod_deps() -> MainDeps:  # pragma: no cover - the hardware/asyncio-run wir
     from pirate_radio.audio_devices import PortId, UdevAudioDeviceResolver
     from pirate_radio.clock import SystemClock
     from pirate_radio.config import load_config
+    from pirate_radio.errors import ConfigError
     from pirate_radio.logging_setup import configure_logging
     from pirate_radio.pipeline.timing import RealSleeper
 
@@ -85,10 +86,13 @@ def _prod_deps() -> MainDeps:  # pragma: no cover - the hardware/asyncio-run wir
     clock = SystemClock()
 
     def sink_factory(port_id: PortId) -> SoundDeviceSink:
-        # The PortAudio device selection for the stable PortId is verified on real hardware via the
-        # udev recipe (docs/ops/udev-audio.md + first-boot.md); the index/device-string binding is a
-        # deployment detail confirmed by the @pytest.mark.hardware smoke.
-        return SoundDeviceSink(sample_rate=DEFAULT_SAMPLE_RATE, channels=1, device=str(port_id))
+        # Translate the stable PortId (port path, R10 identity) to the PortAudio device INDEX — the
+        # sink opens by index, NOT by the sysfs path. None here means the dongle vanished between
+        # config validation and sink construction -> fail loud rather than open the wrong device.
+        index = resolver.device_index_for_port(port_id)
+        if index is None:
+            raise ConfigError(f"audio device for port {port_id!r} is no longer present")
+        return SoundDeviceSink(sample_rate=DEFAULT_SAMPLE_RATE, channels=1, device=index)
 
     def coordinator_factory(config: DaemonConfig) -> Coordinator:
         return Coordinator(

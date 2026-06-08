@@ -120,7 +120,9 @@ class Coordinator:
         from pirate_radio.midnight import MidnightTask
         from pirate_radio.supervisor import Supervisor
 
-        self._supervisor = Supervisor(sleeper=sleeper, on_escalate=self._on_escalate)
+        self._supervisor = Supervisor(
+            sleeper=sleeper, on_escalate=self._on_escalate, on_status=self._record
+        )
         self.registry: dict[str, StationStatus] = {}
         self.depth: int = 1
         self.stations: list[Station] = self._build_stations(ram_budget_bytes)

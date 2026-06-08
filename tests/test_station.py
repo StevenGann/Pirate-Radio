@@ -2,9 +2,10 @@
 
 The per-station supervised unit: load-or-generate today's schedule (R6: corruption/absence →
 regenerate, never crash-loop), anchor (R12), drive the daily slice via ``play_day``, then await the
-day-roll ``asyncio.Event`` and re-slice. Updates its ``StationStatus``; ``skip_item`` is the
-supervisor's poison net. The orchestration is tested with the persistence/generator/play_day seams
-monkeypatched (those are covered by their own suites) so this pins the Station's CONTROL FLOW.
+day-roll ``asyncio.Event`` and re-slice. Updates its ``StationStatus`` and opens the sink as an
+async context manager (the real stream starts in ``__aenter__``). Render-poison is handled in-band
+by the producer, so the Station exposes no ``skip_item``. The orchestration is tested with the
+persistence/generator/play_day seams monkeypatched so this pins the Station's CONTROL FLOW.
 """
 
 from __future__ import annotations
@@ -75,12 +76,6 @@ def _station(tmp_path: Path, **over) -> Station:
 def test_station_is_supervisable(tmp_path) -> None:
     assert isinstance(_station(tmp_path), Supervisable)
     assert _station(tmp_path).name == "PiRate One"
-
-
-def test_skip_item_records_poison_index(tmp_path) -> None:
-    st = _station(tmp_path)
-    st.skip_item(3)
-    assert 3 in st._poisoned  # the supervisor's advance-past-poison net
 
 
 def test_load_or_generate_uses_persisted_when_present(tmp_path, monkeypatch) -> None:
@@ -210,3 +205,21 @@ async def test_run_logs_the_operator_starting_and_on_air_vocabulary(
             await task
     msgs = "\n".join(r.message for r in caplog.records)
     assert "PiRate One starting" in msgs and "PiRate One on air" in msgs  # §H, station-tagged
+
+
+async def test_run_opens_the_sink_as_a_context_manager(tmp_path, monkeypatch) -> None:
+    # deep-dive CRITICAL: the station MUST enter the sink (the real SoundDeviceSink starts its
+    # stream in __aenter__); a sink driven only via play() would crash on real hardware.
+    async def _fake_play_day(**kw):
+        pass
+
+    monkeypatch.setattr("pirate_radio.station.play_day", _fake_play_day)
+    monkeypatch.setattr("pirate_radio.station.load_with_recovery", lambda *a, **k: _schedule())
+    sink = FakeAudioSink()
+    st = _station(tmp_path, sink=sink)
+    task = asyncio.create_task(st.run())
+    await asyncio.sleep(0.05)
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+    assert sink.entered  # the stream was opened before any play()

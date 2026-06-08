@@ -5,8 +5,9 @@ from source, never a crash-loop), **anchor** it (R12), drive the daily slice via
 gap + seek + never-dead-air), then **await the day-roll** ``asyncio.Event`` (set by the midnight
 task after it has written the new day's file — the write-then-signal ordering, §E) and re-slice.
 Cold start and post-crash restart use the identical path (§6): reload from disk + ``find_now`` vs
-``clock.now()``. ``skip_item`` is the supervisor's advance-past-poison net (the producer also
-backstops render-poison in-band). Updates an in-memory ``StationStatus`` for the operator summary.
+``clock.now()``. Render-poison is handled IN-BAND by the producer (backstop + station-tagged
+CRITICAL), so the Station exposes no ``skip_item`` — a poison item never escapes to need one.
+Updates an in-memory ``StationStatus`` for the operator summary.
 """
 
 from __future__ import annotations
@@ -86,7 +87,6 @@ class Station:
             start_delay_seconds  # §A render-stagger (H-RPi-3); applied once at start
         )
         self._on_status = on_status
-        self._poisoned: set[int] = set()  # supervisor advance-past-poison net (defensive)
 
     def prepare_next_day(self, *, force: bool = False) -> None:
         """Generate + persist the schedule for the clock's current day (the midnight task calls this
@@ -101,11 +101,6 @@ class Station:
         written the new day's file). The ``run`` loop, parked on ``day_roll.wait()`` at end of day,
         wakes and re-slices onto the freshly-written schedule."""
         self._day_roll.set()
-
-    def skip_item(self, index: int) -> None:
-        """Record a poison item index (the supervisor calls this after K crashes). The producer
-        backstops render-poison in-band; this is the net for a crash that escapes the producer."""
-        self._poisoned.add(index)
 
     def _status(self, state: StationState, **kw: object) -> None:
         if self._on_status is not None:
@@ -138,33 +133,39 @@ class Station:
     async def run(self) -> None:
         if self._start_delay > 0:  # §A stagger: de-sync the first render across stations (H-RPi-3)
             await self._sleeper.sleep(self._start_delay)
-        while True:
-            self._status(StationState.STARTING)
-            logger.info("station %s starting", self.name)  # operator log vocabulary (§H)
-            day = self._clock.now().date()
-            schedule = self._load_or_generate(day)
-            anchored = anchor(schedule, transition_silence=self._config.transition_silence_seconds)
-            self._status(StationState.ON_AIR)
-            logger.info("station %s on air (schedule %s)", self.name, day.isoformat())
-            await play_day(
-                anchored=anchored,
-                now=self._clock.now(),
-                tts=self._tts,
-                decoder=self._decoder,
-                sink=self._sink,
-                backstop=self._backstop,
-                sleeper=self._sleeper,  # forwarded to run_once via play_day (R23 cooperative wait)
-                refill_budget_seconds=self._refill_budget,
-                text_generator=self._text_generator,
-                persona=self._persona,
-                station_name=self.name,
-                station_tagline=self._config.tagline,
-                loudness_target_lufs=self._config.loudness_target_lufs,
-                sample_rate=self._sample_rate,
-                channels=self._channels,
-                transition_silence=self._config.transition_silence_seconds,
-                maxsize=self._maxsize,
-            )
-            self._status(StationState.REGENERATING)  # end of day; awaiting the midnight roll
-            await self._day_roll.wait()  # set by the midnight task AFTER writing the new day's file
-            self._day_roll.clear()
+        # Open the audio device/stream ONCE for the station's whole lifetime — the real
+        # SoundDeviceSink starts its persistent stream in __aenter__, so ``play`` only ever runs on
+        # an open stream; __aexit__ tears it down on exit/crash so a restart can't leak it.
+        async with self._sink:
+            while True:
+                self._status(StationState.STARTING)
+                logger.info("station %s starting", self.name)  # operator log vocabulary (§H)
+                day = self._clock.now().date()
+                schedule = self._load_or_generate(day)
+                anchored = anchor(
+                    schedule, transition_silence=self._config.transition_silence_seconds
+                )
+                self._status(StationState.ON_AIR)
+                logger.info("station %s on air (schedule %s)", self.name, day.isoformat())
+                await play_day(
+                    anchored=anchored,
+                    now=self._clock.now(),
+                    tts=self._tts,
+                    decoder=self._decoder,
+                    sink=self._sink,
+                    backstop=self._backstop,
+                    sleeper=self._sleeper,  # forwarded to run_once via play_day (R23 cooperative)
+                    refill_budget_seconds=self._refill_budget,
+                    text_generator=self._text_generator,
+                    persona=self._persona,
+                    station_name=self.name,
+                    station_tagline=self._config.tagline,
+                    loudness_target_lufs=self._config.loudness_target_lufs,
+                    sample_rate=self._sample_rate,
+                    channels=self._channels,
+                    transition_silence=self._config.transition_silence_seconds,
+                    maxsize=self._maxsize,
+                )
+                self._status(StationState.REGENERATING)  # end of day; awaiting the midnight roll
+                await self._day_roll.wait()  # set by midnight AFTER writing the new day's file
+                self._day_roll.clear()

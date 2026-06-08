@@ -154,18 +154,24 @@ class Producer:
                     normalize_to, audio, target_lufs=self._target_lufs, track_label=label
                 )
             except ProviderError as exc:
+                # station-tagged so an operator can grep WHICH station degraded (deep-dive Field-Op)
                 logger.warning(
-                    "render failed for %s item (%s) -> backstop (R11/R15)", item.kind, exc
+                    "station %s: backstop fired for %s item (%s) -> R11 bumper (R11/R15)",
+                    self._station_name,
+                    item.kind,
+                    exc,
                 )
                 audio = self._backstop  # already at the station target; not re-normalized
             except Exception as exc:  # noqa: BLE001 — render-poison: NEVER crash the producer (§5.4)
                 # A non-ProviderError render crash (a degenerate file surfacing a C-level decode
                 # error, MemoryError, or a code bug) is backstopped IN-BAND and logged CRITICAL —
-                # so a poison item can never crash-loop the station (Phase-4 C2, handled here rather
-                # than propagated; supervisor advance-past-poison is the net for crashes that escape
-                # the producer entirely). A persistent CRITICAL flood is the loud operator signal.
+                # so a poison item can never crash-loop the station (Phase-4 C2; this in-band
+                # backstop is the SOLE producer poison policy — nothing propagates an item index). A
+                # persistent station-tagged CRITICAL flood is the operator signal (Field-Op).
                 logger.critical(
-                    "render-poison for %s item (%s: %s) -> backstop; investigate (R11/§5.4)",
+                    "station %s: render-poison for %s item (%s: %s) -> backstop; investigate "
+                    "(R11/§5.4)",
+                    self._station_name,
                     item.kind,
                     type(exc).__name__,
                     exc,

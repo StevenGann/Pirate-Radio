@@ -43,7 +43,7 @@ class SoundDeviceSink:
         *,
         sample_rate: int,
         channels: int,
-        device: str,
+        device: str | int,  # PortAudio device: an index (preferred, from the resolver) or a name
         blocksize: int = _DEFAULT_BLOCKSIZE,
         latency: float = _DEFAULT_LATENCY_SECONDS,
         stream_factory: Callable[[], Any] | None = None,

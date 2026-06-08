@@ -46,7 +46,7 @@ cold start (audible-as-bumper, not silence). The midnight task's docstring state
 
 ## Tests
 
-`tests/test_midnight.py` (9): `next_midnight` basic + just-after-midnight; **DST spring-forward 23 h /
+`tests/test_midnight.py` (7): `next_midnight` basic + just-after-midnight; **DST spring-forward 23 h /
 fall-back 25 h** (via `seconds_until_next_midnight`); the loop sleeps the computed seconds;
 regenerate-then-signal each station (file-before-event order); **regen-failure isolated + non-fatal**
 (sibling + later-sibling still roll, failed one not signaled, CRITICAL logged, no raise).

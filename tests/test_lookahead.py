@@ -23,6 +23,7 @@ from pirate_radio.lookahead import (
     _DECODE_TIMEOUT_DEFAULT,
     _LLM_TIMEOUT_DEFAULT,
     _LOOKAHEAD_RAM_BUDGET_BYTES,
+    _RESIDENT_SLACK_SLOTS,
     _STAGGER_STEP_SECONDS,
     _TTS_TIMEOUT_DEFAULT,
     lookahead_depth,
@@ -177,10 +178,10 @@ def test_resolve_returns_needed_when_ram_affords_it() -> None:
 
 
 def test_resolve_returns_needed_at_the_exact_boundary() -> None:
-    # affordable == needed is OK (the boundary is inclusive: it JUST fits)
+    # the budget must cover the REAL resident peak: needed + slack per station. At exactly that, OK.
     per = track_buffer_bytes(200.0)
     n, needed = 4, 3
-    budget = n * needed * per  # affords exactly `needed`
+    budget = n * (needed + _RESIDENT_SLACK_SLOTS) * per  # affords exactly the resident peak
     assert (
         resolve_lookahead_depth(
             needed_depth=needed, worst_track_seconds=200.0, n_stations=n, ram_budget_bytes=budget
@@ -189,11 +190,23 @@ def test_resolve_returns_needed_at_the_exact_boundary() -> None:
     )
 
 
-def test_resolve_fails_fast_one_below_the_boundary() -> None:
-    # affordable == needed - 1 -> the cluster can't be pre-rendered -> FAIL-FAST (NOT clamp)
+def test_resolve_accounts_for_the_resident_slack_slots() -> None:
+    # deep-dive RPi: a budget that affords exactly `needed` (queue only) but NOT needed+slack must
+    # FAIL-FAST — the real peak includes the in-flight player + producer-blocked segments.
     per = track_buffer_bytes(200.0)
     n, needed = 4, 3
-    budget = n * needed * per - 1  # one byte short of `needed`
+    budget = n * needed * per  # affords the queue but not the +slack resident buffers
+    with pytest.raises(ConfigError):
+        resolve_lookahead_depth(
+            needed_depth=needed, worst_track_seconds=200.0, n_stations=n, ram_budget_bytes=budget
+        )
+
+
+def test_resolve_fails_fast_one_below_the_boundary() -> None:
+    # one byte below the resident-peak boundary -> FAIL-FAST (NOT clamp)
+    per = track_buffer_bytes(200.0)
+    n, needed = 4, 3
+    budget = n * (needed + _RESIDENT_SLACK_SLOTS) * per - 1  # one byte short of the resident peak
     with pytest.raises(ConfigError) as exc:
         resolve_lookahead_depth(
             needed_depth=needed, worst_track_seconds=200.0, n_stations=n, ram_budget_bytes=budget

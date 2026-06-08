@@ -196,7 +196,7 @@ def test_registry_has_every_station_initially(tmp_path) -> None:
 def test_summary_counts_on_air_from_the_registry(tmp_path, caplog) -> None:
     coord = _coord(tmp_path)
     coord.registry["Pi0"] = StationStatus(name="Pi0", state=StationState.ON_AIR)
-    coord.registry["Pi1"] = StationStatus(name="Pi1", state=StationState.AIRING_BACKSTOP)
+    coord.registry["Pi1"] = StationStatus(name="Pi1", state=StationState.CRASHED)
     with caplog.at_level(logging.INFO):
         coord._log_summary()
     msg = "\n".join(r.message for r in caplog.records)
