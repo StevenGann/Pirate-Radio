@@ -32,7 +32,7 @@ async def test_claude_live_patter() -> None:
     model = os.environ.get("PIRATE_SMOKE_CLAUDE_MODEL", "").strip()
     if not key or not model:
         pytest.skip("set ANTHROPIC_API_KEY + PIRATE_SMOKE_CLAUDE_MODEL to run the Claude smoke")
-    out = await ClaudeDJ(model=model, api_key=key).patter("station_id", _ctx())
+    out = await ClaudeDJ(model=model, api_key=key).patter(_ctx())
     assert out.strip()
 
 
@@ -41,7 +41,7 @@ async def test_deepseek_live_patter() -> None:
     model = os.environ.get("PIRATE_SMOKE_DEEPSEEK_MODEL", "").strip()
     if not key or not model:
         pytest.skip("set DEEPSEEK_API_KEY + PIRATE_SMOKE_DEEPSEEK_MODEL to run the DeepSeek smoke")
-    out = await DeepSeekDJ(model=model, api_key=key).patter("station_id", _ctx())
+    out = await DeepSeekDJ(model=model, api_key=key).patter(_ctx())
     assert out.strip()
 
 
@@ -52,5 +52,5 @@ async def test_ollama_live_patter() -> None:
         pytest.skip(
             "set PIRATE_SMOKE_OLLAMA_ENDPOINT + PIRATE_SMOKE_OLLAMA_MODEL to run the Ollama smoke"
         )
-    out = await OllamaDJ(model=model, endpoint=endpoint).patter("station_id", _ctx())
+    out = await OllamaDJ(model=model, endpoint=endpoint).patter(_ctx())
     assert out.strip()

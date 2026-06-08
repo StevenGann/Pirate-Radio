@@ -292,7 +292,7 @@ async def test_no_secret_value_in_logs_after_failed_patter(
         kind="station_id", persona="p", station_name="s", current_block=BlockContext(name="b")
     )
     with caplog.at_level("WARNING"):
-        assert await gen.patter("station_id", ctx) == ""  # falls through Claude -> NullDJ floor
+        assert await gen.patter(ctx) == ""  # falls through Claude -> NullDJ floor
     assert all("SUPERSECRET" not in r.getMessage() for r in caplog.records)
 
 

@@ -89,7 +89,7 @@ class _NeverCallDJ:
     def __init__(self) -> None:
         self.calls = 0
 
-    async def patter(self, item_kind: str, context: DjContext | None) -> str:
+    async def patter(self, context: DjContext | None) -> str:
         self.calls += 1
         return "SHOULD NOT BE CALLED"
 
@@ -286,7 +286,10 @@ async def test_non_providererror_render_poison_is_backstopped(caplog) -> None:
     buf = LookAheadBuffer(maxsize=10)
     with caplog.at_level(logging.CRITICAL):
         await Producer(
-            items=[_track_item(10.0)], tts=StubTTS(), decoder=_PoisonDecoder(), buffer=buf,
+            items=[_track_item(10.0)],
+            tts=StubTTS(),
+            decoder=_PoisonDecoder(),
+            buffer=buf,
             backstop=_BACKSTOP,
         ).run()
     segs = _drain(buf)

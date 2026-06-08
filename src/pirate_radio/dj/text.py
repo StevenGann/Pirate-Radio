@@ -11,6 +11,7 @@ scope (R21); the only ``pragma: no cover`` lines are the literal Claude network 
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 from pirate_radio.dj._http import post_json
 from pirate_radio.dj.context import DjContext
@@ -38,10 +39,10 @@ def parse_claude_response(resp: object) -> str:
     return text
 
 
-def parse_openai_chat_response(data: dict) -> str:
+def parse_openai_chat_response(data: dict[str, Any]) -> str:
     """PURE: OpenAI-compatible chat JSON (DeepSeek) -> text. ProviderFatal on missing/null."""
     try:
-        text = data["choices"][0]["message"]["content"].strip()
+        text: str = data["choices"][0]["message"]["content"].strip()
     except (KeyError, IndexError, TypeError, AttributeError) as exc:
         raise ProviderFatal(f"deepseek: unexpected response shape ({exc})") from exc
     if not text:
@@ -49,10 +50,10 @@ def parse_openai_chat_response(data: dict) -> str:
     return text
 
 
-def parse_ollama_response(data: dict) -> str:
+def parse_ollama_response(data: dict[str, Any]) -> str:
     """PURE: Ollama /api/chat JSON -> text. ProviderFatal on missing/null fields."""
     try:
-        text = data["message"]["content"].strip()
+        text: str = data["message"]["content"].strip()
     except (KeyError, TypeError, AttributeError) as exc:
         raise ProviderFatal(f"ollama: unexpected response shape ({exc})") from exc
     if not text:
@@ -90,7 +91,7 @@ class ClaudeDJ:
         self._api_key = api_key
         self._timeout = timeout_seconds
 
-    async def patter(self, item_kind: str, context: DjContext | None) -> str:
+    async def patter(self, context: DjContext | None) -> str:
         if context is None:  # defensive: failover only ever calls with a real context
             raise ProviderFatal("claude: DjContext required")
         system, user = build_system_prompt(context), build_user_prompt(context)
@@ -145,7 +146,7 @@ class DeepSeekDJ:
             ],
         }
 
-    async def patter(self, item_kind: str, context: DjContext | None) -> str:
+    async def patter(self, context: DjContext | None) -> str:
         if context is None:
             raise ProviderFatal("deepseek: DjContext required")
         system, user = build_system_prompt(context), build_user_prompt(context)
@@ -174,7 +175,7 @@ class OllamaDJ:
             ],
         }
 
-    async def patter(self, item_kind: str, context: DjContext | None) -> str:
+    async def patter(self, context: DjContext | None) -> str:
         if context is None:
             raise ProviderFatal("ollama: DjContext required")
         system, user = build_system_prompt(context), build_user_prompt(context)

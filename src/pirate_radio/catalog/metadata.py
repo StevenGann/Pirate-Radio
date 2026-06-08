@@ -34,7 +34,7 @@ def read_metadata(path: Path) -> TrackMetadata | None:
     merely sparse tags (§9.3).
     """
     try:
-        audio = mutagen.File(path)
+        audio = mutagen.File(path)  # type: ignore[attr-defined]  # mutagen re-exports File lazily
     except Exception:  # noqa: BLE001 - mutagen raises a zoo of errors on corrupt files
         return None
     if audio is None or audio.info is None:

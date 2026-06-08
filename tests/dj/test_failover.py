@@ -52,20 +52,20 @@ async def test_first_unavailable_second_succeeds() -> None:
     chain = RankedTextGenerator(
         [ScriptedDJ(error=ProviderUnavailable("down")), ScriptedDJ(text="hi")]
     )
-    assert await chain.patter("intro", _ctx()) == "hi"
+    assert await chain.patter(_ctx()) == "hi"
 
 
 async def test_quota_exceeded_falls_through() -> None:
     chain = RankedTextGenerator(
         [ScriptedDJ(error=ProviderQuotaExceeded("429")), ScriptedDJ(text="hi")]
     )
-    assert await chain.patter("intro", _ctx()) == "hi"
+    assert await chain.patter(_ctx()) == "hi"
 
 
 async def test_provider_fatal_skips_to_next() -> None:
     # §7-Q2 ratified: Fatal is terminal FOR THAT PROVIDER, not the chain
     chain = RankedTextGenerator([ScriptedDJ(error=ProviderFatal("bad key")), ScriptedDJ(text="hi")])
-    assert await chain.patter("intro", _ctx()) == "hi"
+    assert await chain.patter(_ctx()) == "hi"
 
 
 # ---- exhaustion: raises ProviderUnavailable so R11 backstop fires --------------------------
@@ -74,7 +74,7 @@ async def test_all_fail_raises_unavailable_for_backstop() -> None:
         [ScriptedDJ(error=ProviderFatal("x")), ScriptedDJ(error=ProviderUnavailable("y"))]
     )
     with pytest.raises(ProviderUnavailable):
-        await chain.patter("intro", _ctx())
+        await chain.patter(_ctx())
 
 
 async def test_all_fatal_still_raises_unavailable_not_fatal() -> None:
@@ -83,50 +83,50 @@ async def test_all_fatal_still_raises_unavailable_not_fatal() -> None:
         [ScriptedDJ(error=ProviderFatal("a")), ScriptedDJ(error=ProviderFatal("b"))]
     )
     with pytest.raises(ProviderUnavailable):
-        await chain.patter("intro", _ctx())
+        await chain.patter(_ctx())
 
 
 async def test_empty_chain_raises_unavailable() -> None:
     with pytest.raises(ProviderUnavailable):
-        await RankedTextGenerator([]).patter("intro", _ctx())
+        await RankedTextGenerator([]).patter(_ctx())
 
 
 # ---- the NullDJ floor: degrades to "" (never raises) --------------------------------------
 async def test_nulldj_floor_yields_empty_not_raise() -> None:
     chain = RankedTextGenerator([ScriptedDJ(error=ProviderUnavailable("x")), NullDJ()])
-    assert await chain.patter("intro", _ctx()) == ""  # D2 floor: degrade to no patter
+    assert await chain.patter(_ctx()) == ""  # D2 floor: degrade to no patter
 
 
 # ---- order: first success wins, later providers never called -------------------------------
 async def test_order_preserved_first_success_wins() -> None:
     chain = RankedTextGenerator([ScriptedDJ(text="A"), ScriptedDJ(text="B")])
-    assert await chain.patter("intro", _ctx()) == "A"
+    assert await chain.patter(_ctx()) == "A"
 
 
 async def test_order_spy_second_provider_never_called() -> None:
     first, second = ScriptedDJ(text="A"), ScriptedDJ(text="B")
     chain = RankedTextGenerator([first, second])
-    assert await chain.patter("intro", _ctx()) == "A"
+    assert await chain.patter(_ctx()) == "A"
     assert first.calls and second.calls == []  # #2 never invoked
 
 
 # ---- the floor is TOTAL: a non-ProviderError is contained and skipped (DA HIGH) ------------
 async def test_non_providererror_is_contained_and_skips() -> None:
     class _Boom:
-        async def patter(self, item_kind: str, context: DjContext | None) -> str:
+        async def patter(self, context: DjContext | None) -> str:
             raise ValueError("provider bug, NOT a ProviderError")
 
     chain = RankedTextGenerator([_Boom(), ScriptedDJ(text="hi")])
-    assert await chain.patter("intro", _ctx()) == "hi"  # ValueError re-typed -> skipped
+    assert await chain.patter(_ctx()) == "hi"  # ValueError re-typed -> skipped
 
 
 async def test_non_providererror_alone_surfaces_as_unavailable() -> None:
     class _Boom:
-        async def patter(self, item_kind: str, context: DjContext | None) -> str:
+        async def patter(self, context: DjContext | None) -> str:
             raise ValueError("bug")
 
     with pytest.raises(ProviderUnavailable):  # never escapes as a bare ValueError
-        await RankedTextGenerator([_Boom()]).patter("intro", _ctx())
+        await RankedTextGenerator([_Boom()]).patter(_ctx())
 
 
 # ---- per-skip WARNING logging (Field-Op observability) ------------------------------------
@@ -135,7 +135,7 @@ async def test_failover_logs_warning_per_skip(caplog: pytest.LogCaptureFixture) 
         [ScriptedDJ(error=ProviderUnavailable("down")), ScriptedDJ(text="ok")]
     )
     with caplog.at_level("WARNING"):
-        await chain.patter("intro", _ctx())
+        await chain.patter(_ctx())
     assert any("failed" in r.message and "next" in r.message for r in caplog.records)
 
 
@@ -144,7 +144,7 @@ async def test_failover_warning_never_leaks_on_first_success(
 ) -> None:
     chain = RankedTextGenerator([ScriptedDJ(text="A")])
     with caplog.at_level("WARNING"):
-        await chain.patter("intro", _ctx())
+        await chain.patter(_ctx())
     assert not caplog.records  # a clean first-try success logs nothing
 
 
@@ -160,7 +160,7 @@ async def test_failover_logs_exactly_one_warning_per_skip(
         ]
     )
     with caplog.at_level("WARNING"):
-        await chain.patter("intro", _ctx())
+        await chain.patter(_ctx())
     assert len([r for r in caplog.records if r.levelname == "WARNING"]) == 2
 
 
@@ -200,4 +200,4 @@ async def test_ranked_tts_order_spy_second_never_called() -> None:
 # ---- the chain raises the BASE ProviderError type (catchable by the producer) -------------
 async def test_exhaustion_error_is_a_providererror() -> None:
     with pytest.raises(ProviderError):  # ProviderUnavailable IS-A ProviderError
-        await RankedTextGenerator([ScriptedDJ(error=ProviderFatal("x"))]).patter("intro", _ctx())
+        await RankedTextGenerator([ScriptedDJ(error=ProviderFatal("x"))]).patter(_ctx())

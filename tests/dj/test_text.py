@@ -217,14 +217,14 @@ async def test_claudedj_offload_runs_off_the_main_thread(monkeypatch: pytest.Mon
         return "patter!"
 
     monkeypatch.setattr(ClaudeDJ, "_blocking_call", fake_blocking)
-    out = await ClaudeDJ(model="m", api_key="k").patter("intro", _ctx())
+    out = await ClaudeDJ(model="m", api_key="k").patter(_ctx())
     assert out == "patter!"
     assert seen["ident"] != main_ident  # really offloaded via asyncio.to_thread (R23)
 
 
 async def test_claudedj_none_context_is_fatal() -> None:
     with pytest.raises(ProviderFatal):
-        await ClaudeDJ(model="m", api_key="k").patter("intro", None)
+        await ClaudeDJ(model="m", api_key="k").patter(None)
 
 
 async def test_claudedj_reraises_providererror_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -235,7 +235,7 @@ async def test_claudedj_reraises_providererror_unchanged(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(ClaudeDJ, "_blocking_call", boom)
     with pytest.raises(ProviderFatal):
-        await ClaudeDJ(model="m", api_key="k").patter("intro", _ctx())
+        await ClaudeDJ(model="m", api_key="k").patter(_ctx())
 
 
 async def test_claudedj_maps_blocking_exception(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -247,7 +247,7 @@ async def test_claudedj_maps_blocking_exception(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(ClaudeDJ, "_blocking_call", boom)
     with pytest.raises(ProviderQuotaExceeded):
-        await ClaudeDJ(model="m", api_key="k").patter("intro", _ctx())
+        await ClaudeDJ(model="m", api_key="k").patter(_ctx())
 
 
 # ---- DeepSeek/Ollama: post_json monkeypatched at the helper seam ---------------------------
@@ -256,7 +256,7 @@ async def test_deepseekdj_patter_happy(monkeypatch: pytest.MonkeyPatch) -> None:
         "pirate_radio.dj.text.post_json",
         _areturn({"choices": [{"message": {"content": "spun up"}}]}),
     )
-    assert await DeepSeekDJ(model="m", api_key="k").patter("intro", _ctx()) == "spun up"
+    assert await DeepSeekDJ(model="m", api_key="k").patter(_ctx()) == "spun up"
 
 
 async def test_deepseekdj_patter_maps_429(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -265,22 +265,22 @@ async def test_deepseekdj_patter_maps_429(monkeypatch: pytest.MonkeyPatch) -> No
 
     monkeypatch.setattr("pirate_radio.dj.text.post_json", boom)
     with pytest.raises(ProviderQuotaExceeded):
-        await DeepSeekDJ(model="m", api_key="k").patter("intro", _ctx())
+        await DeepSeekDJ(model="m", api_key="k").patter(_ctx())
 
 
 async def test_deepseekdj_none_context_is_fatal() -> None:
     with pytest.raises(ProviderFatal):
-        await DeepSeekDJ(model="m", api_key="k").patter("intro", None)
+        await DeepSeekDJ(model="m", api_key="k").patter(None)
 
 
 async def test_ollamadj_patter_happy(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("pirate_radio.dj.text.post_json", _areturn({"message": {"content": "hi"}}))
-    assert await OllamaDJ(model="m", endpoint="http://lan:11434").patter("intro", _ctx()) == "hi"
+    assert await OllamaDJ(model="m", endpoint="http://lan:11434").patter(_ctx()) == "hi"
 
 
 async def test_ollamadj_none_context_is_fatal() -> None:
     with pytest.raises(ProviderFatal):
-        await OllamaDJ(model="m", endpoint="http://x").patter("intro", None)
+        await OllamaDJ(model="m", endpoint="http://x").patter(None)
 
 
 # ---- H22 secret hygiene: the api_key never appears in a raised error (named at the leak site) -
@@ -292,7 +292,7 @@ async def test_claudedj_error_never_contains_api_key(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(ClaudeDJ, "_blocking_call", boom)
     with pytest.raises(ProviderError) as ei:
-        await ClaudeDJ(model="m", api_key=secret).patter("intro", _ctx())
+        await ClaudeDJ(model="m", api_key=secret).patter(_ctx())
     assert secret not in str(ei.value)  # our code never interpolates the key into the error
 
 
@@ -304,7 +304,7 @@ async def test_deepseekdj_error_never_contains_api_key(monkeypatch: pytest.Monke
 
     monkeypatch.setattr("pirate_radio.dj.text.post_json", boom)
     with pytest.raises(ProviderError) as ei:
-        await DeepSeekDJ(model="m", api_key=secret).patter("intro", _ctx())
+        await DeepSeekDJ(model="m", api_key=secret).patter(_ctx())
     assert secret not in str(ei.value)
 
 
@@ -325,8 +325,8 @@ async def test_no_sdk_imported_during_faked_run(monkeypatch: pytest.MonkeyPatch)
         _areturn({"choices": [{"message": {"content": "y"}}]}),
     )
     monkeypatch.setattr(builtins, "__import__", guard)
-    await ClaudeDJ(model="m", api_key="k").patter("intro", _ctx())  # no anthropic import
-    await DeepSeekDJ(model="m", api_key="k").patter("intro", _ctx())  # no httpx import
+    await ClaudeDJ(model="m", api_key="k").patter(_ctx())  # no anthropic import
+    await DeepSeekDJ(model="m", api_key="k").patter(_ctx())  # no httpx import
 
 
 def test_no_top_level_network_imports() -> None:

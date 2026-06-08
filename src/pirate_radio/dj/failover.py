@@ -75,10 +75,10 @@ class RankedTextGenerator:
     def __init__(self, providers: Sequence[object]) -> None:
         self._providers = tuple(providers)
 
-    async def patter(self, item_kind: str, context: DjContext | None) -> str:
+    async def patter(self, context: DjContext | None) -> str:
         return await _ranked_call(
             self._providers,
-            lambda p: p.patter(item_kind, context),  # type: ignore[attr-defined]
+            lambda p: p.patter(context),  # type: ignore[attr-defined]
             op="patter",
         )
 

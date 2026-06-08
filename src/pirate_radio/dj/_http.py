@@ -9,6 +9,8 @@ import). The only ``pragma: no cover`` lines are the literal network calls (R20)
 
 from __future__ import annotations
 
+from typing import cast
+
 from pirate_radio.errors import (
     ProviderError,
     ProviderFatal,
@@ -55,7 +57,7 @@ async def post_json(
             resp = await client.post(url, headers=headers, json=body)  # pragma: no cover
             if resp.status_code >= 400:  # pragma: no cover
                 raise map_http_status(provider, resp.status_code, resp.text)
-            return resp.json()  # pragma: no cover
+            return cast("dict[str, object]", resp.json())  # pragma: no cover
     except ProviderError:
         raise
     except Exception as exc:  # noqa: BLE001 — re-typed by the pure mapper

@@ -24,7 +24,7 @@ def test_fakes_satisfy_their_protocols() -> None:
 
 
 async def test_nulldj_returns_empty_patter() -> None:
-    assert await NullDJ().patter("station_id", None) == ""
+    assert await NullDJ().patter(None) == ""
 
 
 async def test_stubtts_minimum_duration_floor() -> None:

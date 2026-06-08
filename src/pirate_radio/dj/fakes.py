@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class NullDJ:
     """The DJ-brain floor (§9.3 / D2): produces no patter."""
 
-    async def patter(self, item_kind: str, context: DjContext | None = None) -> str:
+    async def patter(self, context: DjContext | None = None) -> str:
         return ""
 
 
@@ -30,7 +30,8 @@ class ScriptedDJ:
     constant ``text``, or per-kind via ``by_kind`` — or raises a seeded ``ProviderError``
     (folding the old ``FailingDJ``; **the error wins** over any text/by_kind). Records every
     ``(kind, context)`` attempt BEFORE raising, so a failover order-spy sees failed attempts
-    too. Drives the P3-4 failover and P3-8 producer tests."""
+    too (kind is read from ``context.kind`` — R16). Drives the P3-4 failover and P3-8 producer
+    tests."""
 
     def __init__(
         self,
@@ -44,11 +45,12 @@ class ScriptedDJ:
         self._error = error
         self.calls: list[tuple[str, DjContext | None]] = []
 
-    async def patter(self, item_kind: str, context: DjContext | None = None) -> str:
-        self.calls.append((item_kind, context))  # record-then-raise (diagnostics see attempts)
+    async def patter(self, context: DjContext | None = None) -> str:
+        kind = context.kind if context is not None else ""  # R16: kind rides on the context
+        self.calls.append((kind, context))  # record-then-raise (diagnostics see attempts)
         if self._error is not None:
             raise self._error
-        return self._by_kind.get(item_kind, self._text)
+        return self._by_kind.get(kind, self._text)
 
 
 class StubTTS:

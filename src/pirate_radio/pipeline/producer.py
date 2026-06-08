@@ -188,7 +188,7 @@ class Producer:
             station_tagline=self._station_tagline,
             recent_tracks=tuple(self._recent),  # grounding: tracks aired before this patter
         )
-        text = await self._dj.patter(ctx.kind, ctx)  # ranked LLM chain; NullDJ floor -> ""
+        text = await self._dj.patter(ctx)  # ranked LLM chain; NullDJ floor -> ""
         if not text.strip():  # §9.3 floor: degrade to the Phase-1 template line
             logger.warning(  # Field-Op: operator visibility on the degrade
                 "dj patter empty for %s item -> template fallback (NullDJ/empty-chain floor)",

@@ -22,9 +22,10 @@ class TextGenerator(Protocol):
     their own I/O, local impls that block MUST hop via ``asyncio.to_thread``. The
     grounded ``DjContext`` (§9.2, R16) is passed in Phase 3 — the seam the Phase-1
     docstring reserved; ``None`` is still accepted (the ``NullDJ`` floor ignores it).
+    The item kind is carried by ``context.kind`` (R16) — no separate ``item_kind`` arg.
     """
 
-    async def patter(self, item_kind: str, context: DjContext | None) -> str: ...
+    async def patter(self, context: DjContext | None) -> str: ...
 
 
 @runtime_checkable
