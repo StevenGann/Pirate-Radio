@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 
 from pirate_radio.audio.buffer import DEFAULT_SAMPLE_RATE, AudioBuffer
+from pirate_radio.dj.context import DjContext
 from pirate_radio.errors import ProviderError, ProviderUnavailable
 
 logger = logging.getLogger(__name__)
@@ -20,8 +21,34 @@ logger = logging.getLogger(__name__)
 class NullDJ:
     """The DJ-brain floor (§9.3 / D2): produces no patter."""
 
-    async def patter(self, item_kind: str, context: object | None = None) -> str:
+    async def patter(self, item_kind: str, context: DjContext | None = None) -> str:
         return ""
+
+
+class ScriptedDJ:
+    """Text-side analogue of ``StubTTS``/``FailingTTS`` (R21). Returns canned patter — a
+    constant ``text``, or per-kind via ``by_kind`` — or raises a seeded ``ProviderError``
+    (folding the old ``FailingDJ``; **the error wins** over any text/by_kind). Records every
+    ``(kind, context)`` attempt BEFORE raising, so a failover order-spy sees failed attempts
+    too. Drives the P3-4 failover and P3-8 producer tests."""
+
+    def __init__(
+        self,
+        *,
+        text: str = "",
+        by_kind: dict[str, str] | None = None,
+        error: ProviderError | None = None,
+    ) -> None:
+        self._text = text
+        self._by_kind = by_kind or {}
+        self._error = error
+        self.calls: list[tuple[str, DjContext | None]] = []
+
+    async def patter(self, item_kind: str, context: DjContext | None = None) -> str:
+        self.calls.append((item_kind, context))  # record-then-raise (diagnostics see attempts)
+        if self._error is not None:
+            raise self._error
+        return self._by_kind.get(item_kind, self._text)
 
 
 class StubTTS:

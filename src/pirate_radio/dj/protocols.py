@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 from pirate_radio.audio.buffer import AudioBuffer
+from pirate_radio.dj.context import DjContext
 
 
 @runtime_checkable
@@ -19,10 +20,11 @@ class TextGenerator(Protocol):
 
     Raises ``ProviderError`` (R15) on backend failure. Awaitable; network impls do
     their own I/O, local impls that block MUST hop via ``asyncio.to_thread``. The
-    real grounded ``DjContext`` (§9.2) lands in Phase 3; Phase 1 passes ``None``.
+    grounded ``DjContext`` (§9.2, R16) is passed in Phase 3 — the seam the Phase-1
+    docstring reserved; ``None`` is still accepted (the ``NullDJ`` floor ignores it).
     """
 
-    async def patter(self, item_kind: str, context: object | None) -> str: ...
+    async def patter(self, item_kind: str, context: DjContext | None) -> str: ...
 
 
 @runtime_checkable
