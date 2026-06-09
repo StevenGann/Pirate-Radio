@@ -12,7 +12,15 @@ for metadata. No new Python packages are needed — only the `fpcalc` binary.
   Tag when the daemon is stopped, or on another machine, or accept the de-prioritised contention.
 - **Expect it to be slow.** `fpcalc` decodes ~120 s of each file; a 10k-file library is roughly
   **1–4 hours** of CPU just for fingerprinting (plus the ≤1 req/s MusicBrainz lookups for the files
-  that need them). It is resumable — re-running skips already-tagged files.
+  that need them). It is resumable — re-running skips files that already have BOTH title and artist.
+- **A 1–4 h all-core decode run heats the Pi** — make sure active cooling is fitted (a passively
+  cooled Pi will thermal-throttle and run even slower).
+- **Each tagged file is rewritten in full.** The atomic write copies the whole file to a temp, writes
+  the tags, then renames — so a tagged file costs ~2× its size in writes. That is why you run against
+  the content drive, not the boot SD (below), and why `--dry-run`/`--limit` trials are cheap (no copy).
+- **Partial tags re-fetch.** A file that ends up with a title but no artist does NOT pass the
+  skip-gate, so a later run re-fingerprints it and re-queries the APIs (rate-limited). Fully-tagged
+  files are skipped cheaply; expect repeat work only for the partially-matched stragglers.
 
 ## 1. Prerequisites
 

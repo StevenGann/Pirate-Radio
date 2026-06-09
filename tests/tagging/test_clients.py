@@ -298,3 +298,16 @@ def test_musicbrainz_recording_sends_ua_and_is_rate_limited() -> None:
     client.recording("mbid-2")  # back-to-back -> the ≤1 req/s limiter sleeps 1.0s
     assert seen["headers"]["User-Agent"] == "PiRate/1.0 ( me@example.com )"
     assert slept == [pytest.approx(1.0)]
+
+
+def test_parse_acoustid_skips_out_of_range_or_nonnumeric_score() -> None:
+    # Senior deep-dive: a bad score is a tolerated sparse result, not a ValidationError crash
+    data = {
+        "status": "ok",
+        "results": [
+            {"score": "bogus", "recordings": [{"id": "x"}]},
+            {"score": 1.5, "recordings": [{"id": "y"}]},
+            {"score": 0.9, "recordings": [{"id": "z"}]},
+        ],
+    }
+    assert parse_acoustid_response(data) == (AcoustIdMatch(recording_id="z", score=0.9),)

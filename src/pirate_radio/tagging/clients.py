@@ -173,12 +173,12 @@ def parse_acoustid_response(data: dict[str, object]) -> tuple[AcoustIdMatch, ...
     matches: list[AcoustIdMatch] = []
     for result in cast("list[dict[str, Any]]", data.get("results", [])):
         score = result.get("score")
-        if score is None:
-            continue
+        if not isinstance(score, int | float) or not (0.0 <= score <= 1.0):
+            continue  # a missing / out-of-range score is a tolerated sparse result, not a crash
         for rec in result.get("recordings", []):
             rid = rec.get("id")
             if rid:
-                matches.append(AcoustIdMatch(recording_id=rid, score=score))
+                matches.append(AcoustIdMatch(recording_id=rid, score=float(score)))
     return tuple(sorted(matches, key=lambda m: (-m.score, m.recording_id)))
 
 

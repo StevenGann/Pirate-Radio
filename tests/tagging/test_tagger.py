@@ -112,6 +112,21 @@ def test_per_file_failure_is_isolated(tmp_path) -> None:
     assert {p.path.name for p in written} == {"b.flac"}
 
 
+def test_generic_exception_is_also_isolated(tmp_path) -> None:
+    # DA: the per-file guard must catch a NON-TaggingError too (a bare RuntimeError/OSError from a
+    # degenerate file / mutagen) — one bad file never aborts the batch.
+    class _Boom:
+        def fingerprint(self, path: Path) -> Fingerprint:
+            if path.name == "a.flac":
+                raise RuntimeError("mutagen segfault surfaced as a Python error")
+            return Fingerprint(duration=100.0, fingerprint="FP")
+
+    seams, written = _seams(tmp_path, fingerprinter=_Boom())
+    summary = tag_library(**seams)
+    assert summary.failed == 1 and summary.tagged == 1  # b.flac still tagged
+    assert {p.path.name for p in written} == {"b.flac"}
+
+
 def test_dry_run_writes_nothing(tmp_path) -> None:
     seams, _ = _seams(tmp_path)
     summary = tag_library(**seams, dry_run=True)

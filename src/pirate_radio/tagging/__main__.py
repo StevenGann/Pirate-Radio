@@ -85,6 +85,27 @@ def _preflight(args: argparse.Namespace) -> None:  # pragma: no cover (probes th
         raise ConfigError(f"AcoustID key env var {args.acoustid_key_env!r} is not set or empty")
     if not args.user_agent.strip():
         raise ConfigError("--user-agent must be a non-empty descriptive string with contact info")
+    _warn_if_broadcasting()
+
+
+def _warn_if_broadcasting() -> None:  # pragma: no cover (best-effort host probe)
+    import shutil
+    import subprocess
+
+    systemctl = shutil.which("systemctl")
+    if systemctl is None:
+        return
+    try:
+        result = subprocess.run(
+            [systemctl, "is-active", "pirate-radio"], capture_output=True, text=True, timeout=5
+        )
+    except (OSError, subprocess.SubprocessError):
+        return
+    if result.stdout.strip() == "active":
+        logger.warning(
+            "pirate-radio daemon appears ACTIVE — tagging contends for CPU/IO and can glitch the "
+            "live stations; stop it or run off-peak (H-T6)"
+        )
 
 
 def _run(args: argparse.Namespace) -> TagSummary:  # pragma: no cover (real fpcalc + network wiring)
