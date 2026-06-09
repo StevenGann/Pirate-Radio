@@ -7,11 +7,12 @@ no ``datetime.now()`` anywhere (the injected clock owns "today" and the zone).
 
 §8.4 walk: for each grid slot in time order, emit a ``block_transition`` at the slot
 boundary, then fill the slot with weighted, repeat-avoiding ``track`` picks, dropping a
-``station_id`` near each top-of-hour and a ``block_reminder`` periodically. Every element
-advances the cursor by its own ``duration`` **plus** ``transition_silence_seconds`` (the
-hard-cut gap, §10) — the silence is part of timing AND of the fill calculation. The fill
-loop stops when the gap to the boundary is smaller than the shortest item in the pool
-(§8.5 soft boundary): the final placed item may run slightly past the boundary.
+``station_id`` at the first item of each new clock-hour and a ``block_reminder``
+periodically. Every element advances the cursor by its own ``duration`` **plus**
+``transition_silence_seconds`` (the hard-cut gap, §10) — the silence is part of timing AND
+of the fill calculation. The fill loop stops when the gap to the boundary is smaller than
+the shortest item in the pool (§8.5 soft boundary): the final placed item may run slightly
+past the boundary.
 """
 
 from __future__ import annotations

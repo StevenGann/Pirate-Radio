@@ -1,5 +1,5 @@
 {
-  "state_dir": "/mnt/ssd/pirate-radio/state",
+  "state_dir": "/var/lib/pirate-radio",
   "ffmpeg_binary": "/usr/bin/ffmpeg",
   "decode_timeout_seconds": 120,
   "tts_timeout_seconds": 30,

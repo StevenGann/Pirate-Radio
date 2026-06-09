@@ -92,6 +92,10 @@ This tiles 00:00→06:00→10:00→18:00→24:00 contiguously; the last slot end
 `group` (`overnight`, `morning_talk`, `jazz`) must be a non-empty subfolder of that station's
 `content_dir`.
 
+> The generator drops a station ID at the first item of each new clock-hour. A slot boundary that
+> falls mid-hour starts a new block whose first item lands in the *same* hour, so you may hear a
+> second station ID that hour — expected and harmless (decision 0067 carry-forward).
+
 An "all day, one group" grid is just:
 
 ```yaml

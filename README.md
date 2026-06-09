@@ -114,17 +114,16 @@ but to actually hear LLM patter you need at least one working text backend and o
 - **Set a provider-side spend cap** on every metered cloud account (Anthropic, **DeepSeek**,
   ElevenLabs are all paid). Patter output is bounded by `_MAX_TOKENS = 256` per call and failover
   does **no in-place retry** (≤ chain-length calls per item), but a hard account-level cap is the
-  real backstop against a runaway bill. `max_requests_per_minute` in `config.json` is **reserved,
-  not yet enforced** (a Phase-4 coordinator concern) — do not rely on it to throttle.
+  real backstop against a runaway bill.
 - **Per-call network timeouts** default to **20 s for every LLM backend** (`llm.request_timeout_seconds`,
   applied uniformly incl. Ollama) and **30 s for TTS** (`tts_timeout_seconds`); a hung call →
   fail-through → floor. **On a flaky link, order the chains local-first** (Piper before ElevenLabs;
   Ollama-on-LAN ahead of cloud) — failover tries providers *in series* with no global deadline, so
   a total-outage worst case for one patter item is the **sum** of its chain timeouts (~Σ ≈ 60 s LLM
   + 30 s TTS); local-first keeps that latency off the critical path.
-- **Logging:** the daemon's logging handler/level is set up by the Phase-4 entrypoint (not yet
-  shipped). Until then, the failover/degrade WARNINGs reach `stderr` via Python's last-resort
-  handler; run under a harness that calls `logging.basicConfig(level=INFO)` to see the full trail.
+- **Logging:** the daemon entrypoint (`python -m pirate_radio`) configures logging at startup
+  (`configure_logging` + `--log-level`, default INFO); under systemd it goes to journald, so
+  `journalctl -u pirate-radio` shows the full failover/degrade trail.
 
 A **complete, copy-able** config lives at [`config.example.json`](config.example.json) (pure JSON —
 `cp config.example.json config.json` and edit the `REPLACE-…` values + paths). Annotated excerpt of
@@ -158,6 +157,16 @@ the Phase-3-specific parts (ranked LLM + ranked TTS):
 > **Verify the model ids** (`model`) against current vendor docs at deploy time — a retired model is
 > a `config.json` edit, not a code change (the `model` is config, never hardcoded).
 
+## Documentation
+
+- **Runbooks** (`docs/ops/`): [`first-boot.md`](docs/ops/first-boot.md) → [`grids.md`](docs/ops/grids.md)
+  → [`udev-audio.md`](docs/ops/udev-audio.md) → [`tagging.md`](docs/ops/tagging.md) →
+  [`config-reference.md`](docs/ops/config-reference.md) → [`control-api.md`](docs/ops/control-api.md).
+- **Design:** [`PiRate_Radio_Design_Doc.md`](PiRate_Radio_Design_Doc.md) (the panel-adopted §21
+  "Review Resolutions" govern).
+- **Developer area map:** [`docs/CODEMAP.md`](docs/CODEMAP.md) — subsystem → key modules → seams.
+- **Testing philosophy:** [`docs/process/strict-tdd.md`](docs/process/strict-tdd.md).
+
 ## Development
 
 Requires **Python 3.11+**. The runtime targets **64-bit Raspberry Pi OS (arm64)
@@ -181,7 +190,8 @@ mypy
 pytest -m "not hardware and not network"
 ```
 
-Current gate: ruff + ruff-format + mypy `--strict` clean, **865 tests**, ~97% coverage. CI runs
+Current gate: ruff + ruff-format + mypy `--strict` clean; the full `pytest` suite green with an
+enforced **80% coverage floor** (~97%). CI runs
 `-m "not hardware and not network"`: hardware-dependent code and the live LLM/TTS smokes are
 excluded, and **no CI test imports a provider SDK or opens a socket** (R21) — the network path is
 lazily imported and proven absent by import-guard tests.
@@ -203,7 +213,7 @@ exist only to validate the real wire shape on a deployment.
 
 Design and implementation decisions are made by a standing seven-agent review panel
 (brief → distill → vote) coordinated through a manager loop. The full audit trail —
-design review, per-phase plans, and per-increment votes — is in
-[`docs/decisions/`](docs/decisions/) (`0001`–`0063`) and
+design review, per-phase plans, and per-increment votes — is the full set under
+[`docs/decisions/`](docs/decisions/) and
 [`docs/agents/README.md`](docs/agents/README.md). Implementation plans live in
 [`docs/plans/`](docs/plans/).

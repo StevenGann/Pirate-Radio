@@ -1,5 +1,7 @@
 # PiRate Radio — Autonomous Build Log
 
+> **Historical build journal (overnight autonomous build). NOT maintained — see README + docs/decisions/ for current status.**
+
 Running log of the overnight autonomous build (started 2026-06-07 night). Updated
 after each increment so progress survives context summarization. Process for every
 increment: **tests authored from spec → confirmed RED → panel reviews the tests
@@ -255,33 +257,3 @@ Full-seven review of the assembled system (phases 0→6, 62 src files / ~6.6k LO
 
 ## 🎉 OVERNIGHT BUILD MANDATE COMPLETE
 PiRate Radio is built through design-doc §20 **phases 0→6**, every phase committed + full-seven deep-dived, closed by the final whole-system code-quality + documentation review (unanimous 7/7 CONFIRM) and its remediation. A deployable multi-station FM broadcaster with an AI DJ, two-tier supervision, DST-correct day-roll, graceful shutdown, offline tagger, optional control API, and a complete operator runbook set (first-boot / grids / udev / tagging / control-api / config-reference).
-
-### Final — deep-dive code-quality + documentation review  — ✅ COMPLETE (all 7 validated)
-- Manager-led pass `0010` (full team initially blocked by a transient provider rate-limit).
-  No CRITICAL/HIGH code defects; A4/R5/R6/R10/A2/R14-R17/D6 spot-verified in code.
-  Fixed HIGH: stale README rewritten. Fixed MEDIUM: strict-tdd.md focused-panel note.
-  Carry-forward: loudness_target_lufs bound (Phase 2); design-doc §6/§8.4 corrections
-  (when resume/generator land).
-- **Team validation:** Senior Dev CONFIRM. **Devil's Advocate DISPUTE → found a HIGH
-  the manager pass missed: clock.py DST freeze.** Both DA findings remediated via
-  bug-fix TDD (clock regression tests, 3-0; config docstring softened). (commit 5d377de)
-- **Batch 1 (Old Man + QA + RPi) — all CONFIRM, no new CRITICAL/HIGH.** Convergent
-  finding (QA MEDIUM / Old Man LOW): clock.py third fallback tier (system name resolves
-  but `ZoneInfo()` can't load it — missing tzdata) was untested → added regression test
-  + tightened the unresolvable-host WARNING assertion. LOW housekeeping: README count
-  refreshed; "(commit pending)" language removed. RPi LOW (numpy platform marker)
-  **declined** — an `aarch64` marker would strip numpy from x86_64 dev/CI; prose warning
-  stands. Gate after batch-1 remediation: 195 tests, ruff/mypy clean.
-- **Batch 2 (Fact Checker + Field Operator) — both CONFIRM, no new CRITICAL/HIGH.**
-  Fact Checker re-verified all gate numbers + the DST-bug premise empirically; LOW: stale
-  pyproject description (fixed). Field Operator found an operability MEDIUM: `PIRATE_RADIO_TZ`
-  undocumented for operators → `.env.example` rewritten with real vars + the TZ knob, README
-  Configuration section added; second-tier clock WARNING now names the remedy (test asserts it).
-- **Deep-dive COMPLETE — all 7 agents validated. No CRITICAL/HIGH remain.** Carry-forwards
-  (Phase 2): loudness_target_lufs bound, TTS-credential env preflight; (later) design-doc
-  §6/§8.4 text. Gate: 195 tests, 98.08% cov, ruff/mypy clean.
-
-## Notes
-- Quality gate as of grid: ruff clean, mypy clean (10 files), 101 tests, 98.30% cov.
-- Hardware/external code is built behind Protocols + unit-tested with fakes; real
-  integrations (audio device, Piper, LLM/TTS, FastAPI bind) are deferred/marked.

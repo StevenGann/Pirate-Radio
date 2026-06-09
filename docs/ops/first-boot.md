@@ -99,10 +99,18 @@ sudo install -m 0644 config.example.json /etc/pirate-radio/config.json
 sudoedit /etc/pirate-radio/config.json     # set stations, audio_device names, grids, LLM/TTS, state_dir
 ```
 
-**`state_dir` MUST equal the unit's `StateDirectory` mount** (`/var/lib/pirate-radio`, created `0700`
-by systemd on start). If they differ, schedules write outside the unit-managed dir — wrong owner/mode
-and, if that path is on the boot SD, defeating the off-SD goal (A6). To enable the optional control
-API, add a `control` block here too — see `docs/ops/control-api.md` (off by default).
+**`state_dir` MUST equal the unit's `StateDirectory` path** (`/var/lib/pirate-radio`, created `0700`
+by systemd on start — this is what `config.example.json` ships). If they differ, schedules write
+outside the unit-managed dir — wrong owner/mode, and you lose the systemd-managed lifecycle.
+
+**Keeping state off the boot SD (A6).** The schedules under `state_dir` write continuously, so they
+must not live on the SD card. The §0 **SSD/USB boot** recommendation handles this automatically:
+when the whole OS (and thus `/var/lib`) is on the SSD, `/var/lib/pirate-radio` is already off the SD.
+**If you must boot from the SD card**, mount the SSD over `/var/lib` (or `/var/lib/pirate-radio`
+specifically) via `/etc/fstab` *before* first start, so `StateDirectory` lands on the SSD.
+
+To enable the optional control API, add a `control` block here too — see
+`docs/ops/control-api.md` (off by default).
 
 **Before this step, lay out your content folders and write your grid files.** The radio plays what
 your grids schedule from your content groups, and the dry-run below validates both. If you have not
@@ -154,6 +162,10 @@ journalctl -u pirate-radio | grep -E 'backstop fired|render-poison'
   [`control-api.md`](control-api.md) for skip/regenerate/status/logs over an SSH tunnel.
 - **Logs:** `journalctl -u pirate-radio`. Restart/backoff/escalation, midnight regen done|FAILED, and
   backstop-fired events are all there, station-tagged.
+- **Turn up verbosity on a degraded station:** the entrypoint takes `--log-level` (default `INFO`).
+  Add `--log-level DEBUG` to the `ExecStart=` line (or via a drop-in) and `systemctl restart` to see
+  per-render detail. Note **DEBUG is dropped from the control-API `/logs` ring** — DEBUG shows in
+  journald only (`journalctl -u pirate-radio`), so that is where to look when chasing a render issue.
 - **Schedules** live under `state_dir/<station>/<date>.json` and roll automatically at local midnight
   (DST-correct).
 

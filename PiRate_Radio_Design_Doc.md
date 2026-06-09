@@ -250,10 +250,10 @@ A bad grid must fail loudly at startup, never silently at runtime.
 
 For the selected grid, walk a cursor through each slot in time order:
 
-1. Emit a `block_transition` item at the slot boundary.
-2. While the cursor is within the slot, pick a track from the slot's group (weighted to avoid recent repeats) and append a `track` item with `planned_start = cursor`. **Stop when the remaining gap to the boundary is smaller than the shortest item in that block's pool** (i.e. nothing more can fit) — at which point the block ends and the next begins. The final placed track may run slightly past the boundary; soft boundaries absorb it.
-3. Periodically emit a `block_reminder` within long slots.
-4. Insert a `station_id` near each top-of-hour.
+1. **(§8.4.1)** Emit a `block_transition` item at the slot boundary.
+2. **(§8.4.2)** While the cursor is within the slot, pick a track from the slot's group (weighted to avoid recent repeats) and append a `track` item with `planned_start = cursor`. **Stop when the remaining gap to the boundary is smaller than the shortest item in that block's pool** (i.e. nothing more can fit) — at which point the block ends and the next begins. The final placed track may run slightly past the boundary; soft boundaries absorb it.
+3. **(§8.4.3)** Periodically emit a `block_reminder` within long slots.
+4. **(§8.4.4)** Insert a `station_id` at the first item of each new clock-hour.
 
 Each placed element advances the cursor by its own duration **plus the transition silence** (`transition_silence_seconds`, default 2.0) — the hard-cut gap between elements (see §10). That silence is part of timing and of the fill calculation.
 
@@ -285,7 +285,7 @@ All are `ScheduleItem` kinds rendered just-in-time by the producer:
 - **factoid** — a grounded aside about the track or artist.
 - **block_transition** — closes one block, opens the next.
 - **block_reminder** — periodic "you're listening to X, Y is up at \<time\>."
-- **station_id** — top-of-hour identification.
+- **station_id** — once-per-clock-hour identification.
 
 ### 9.2 Grounding (anti-hallucination)
 
@@ -433,8 +433,6 @@ class Grid(BaseModel):
     name: str
     slots: list[Slot]
 
-ItemKind = Literal["track", "station_id", "block_transition", "block_reminder"]
-
 # (Correction adopted during implementation, R17: ScheduleItem is a *discriminated union*
 # on `kind`, not a single class with nullable fields — invalid states are unrepresentable.
 # All variants share planned_start (tz-aware, D6) + duration + block_name; only TrackItem
@@ -546,7 +544,7 @@ The daemon exposes a **RESTful API** (FastAPI) for inspection and control — th
 | `POST /stations/{name}/skip` | Skip at the **next** boundary: drop the next buffered item (one-shot). Cannot cut the currently-airing segment — that would break gaplessness. Returns `202 Accepted`. |
 | `GET /logs?station=&level=&since=&limit=` | **Query logs** — filter by station, level, and time window. |
 
-The API binds to the homelab network; authentication (e.g. a bearer token) and a browser UI on top of these endpoints are later additions. The web console / phone remote envisioned earlier becomes a thin client over this API.
+The API **binds to loopback (`127.0.0.1`) by default** and **bearer-token auth shipped in Phase 6** (see [`docs/ops/control-api.md`](docs/ops/control-api.md)); reach it over an SSH tunnel. A browser UI / phone remote on top of these endpoints is a later, optional layer — a thin client over this API.
 
 ## 16. Resolved Decisions
 
@@ -600,43 +598,17 @@ The API binds to the homelab network; authentication (e.g. a bearer token) and a
 
 ## 19. Proposed Module Layout
 
-> *(Correction adopted during implementation: the **actual** shipped layout lives under `src/pirate_radio/` (src-layout), and has drifted from this "Proposed" sketch — e.g. `clock.py`, `errors.py`, `midnight.py`, `lookahead.py`, `audio_devices.py`, `scrub.py`, `pipeline/segment.py`/`timing.py`/`daily.py`, `dj/context.py`/`protocols.py`/`failover.py`/`build.py`/`fakes.py`, `control/api.py`/`service.py`/`models.py`/`logs.py`, `audio/binaries.py`, and the `tagging/` package. Treat the tree below as indicative intent; `src/pirate_radio/` is the ground truth.)*
+> *(Correction adopted during implementation: this "Proposed" sketch is superseded — the shipped
+> tree under `src/pirate_radio/` (src-layout) has grown well past it. The authoritative,
+> up-to-date area map is [`docs/CODEMAP.md`](docs/CODEMAP.md); `src/pirate_radio/` is the ground
+> truth.)*
 
-```
-src/pirate_radio/
-  __main__.py            # entry point — starts the coordinator
-  config.py              # Pydantic config models + loader + validation
-  coordinator.py         # daemon: supervises stations, owns shared services
-  supervisor.py          # restart-on-failure logic
-  station.py             # per-station orchestration (scheduler + producer + player)
-  catalog/
-    scanner.py           # folder scan → tagged tracks
-    metadata.py          # mutagen reads
-    models.py            # Track
-  schedule/
-    grid.py              # Slot/Grid models + YAML loader + validation
-    generator.py         # daily schedule generation from grid + catalog
-    models.py            # ScheduleItem, DailySchedule
-    resume.py            # find_now + persistence
-  pipeline/
-    producer.py          # JIT render: schedule → patter → TTS → assembled segment
-    player.py            # consumer: drains buffer → audio sink
-    buffer.py            # the look-ahead queue
-  audio/
-    decode.py            # ffmpeg/pydub → samples
-    sink.py              # sounddevice output, device targeting
-    loudness.py          # EBU R128 normalization
-  dj/
-    text.py              # TextGenerator protocol + Claude/DeepSeek/Ollama/Null impls
-    tts.py               # TTSEngine protocol + Piper/espeak/ElevenLabs impls
-    failover.py          # ranked-provider wrapper (tries each, falls through) for text + TTS
-    prompts.py           # grounded prompt templates
-  control/
-    api.py               # FastAPI app: stations, now, schedule, regenerate, skip, logs
-  logging.py             # structured flat-JSON logs (queryable via the API)
-  tools/
-    tag_library.py       # offline AcoustID + MusicBrainz batch tagger (standalone CLI)
-```
+The top-level shape: a daemon **spine** (`__main__.py`, `coordinator.py`, `station.py`,
+`supervisor.py`, `midnight.py`, plus leaf utils) drives per-station **scheduling**
+(`schedule/`, `lookahead.py`), the look-ahead render **pipeline** (`pipeline/`), the **AI DJ**
+(`dj/`) and **audio** leaves (`audio/`); alongside sit the offline **tagger** (`tagging/`) and
+the optional **control API** (`control/`). See [`docs/CODEMAP.md`](docs/CODEMAP.md) for the full
+module-by-module map and the Protocol seams.
 
 ## 20. Implementation Roadmap
 
@@ -821,7 +793,7 @@ The producer renders **serially**, so the only thing that keeps it ahead of a sh
 
 **Buffer depth.** `depth = worst_consecutive_patter + 1` — the longest run of consecutive non-track items (a patter cluster), plus the one masking-track slot being consumed. The generator's realistic worst case is 2 (`block_transition` + `station_id` at a top-of-hour). An all-track schedule still needs depth 1. This `depth` is passed to the look-ahead queue (`run_once(maxsize=depth)`).
 
-**Fixed RAM budget.** `_LOOKAHEAD_RAM_BUDGET_BYTES ≈ 1.6 GB` (≈ 40% of a 4 GB Pi's total RAM, sized for the 4 GB / 4-station target). It is **deliberately a fixed constant, NOT a `psutil`-derived fraction of free RAM**: the boot result must be **byte-identical across reboots** so a config that fails fast at 3 a.m. fails the same way every time. No `psutil` dependency.
+**Fixed RAM budget.** `LOOKAHEAD_RAM_BUDGET_BYTES ≈ 1.6 GB` (≈ 40% of a 4 GB Pi's total RAM, sized for the 4 GB / 4-station target). It is **deliberately a fixed constant, NOT a `psutil`-derived fraction of free RAM**: the boot result must be **byte-identical across reboots** so a config that fails fast at 3 a.m. fails the same way every time. No `psutil` dependency.
 
 **Resident slack.** The budget covers `depth + _RESIDENT_SLACK_SLOTS` (**+2**) whole-track buffers **per station** — the queue **plus** the segment the player popped and is writing, **plus** the segment the producer finished and is blocked trying to `put`. So the boundary is honest, not optimistic by two tracks.
 

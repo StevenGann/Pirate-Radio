@@ -198,3 +198,8 @@ Use `/logs` for a quick "what is this running process doing right now" over the 
   control`.
 - **`/logs` is empty or missing old lines.** Expected — it's an in-memory ring, lost on restart and
   capped at `log_ring_size`. Use `journalctl` for history.
+
+
+---
+
+**Related:** [`first-boot.md`](first-boot.md) (the full bring-up runbook) · [`config-reference.md`](config-reference.md) (every config key).

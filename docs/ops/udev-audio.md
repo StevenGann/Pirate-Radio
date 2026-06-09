@@ -71,3 +71,8 @@ journalctl -u pirate-radio -b | grep -iE 'audio_device|resolve|PortId'
 Re-verify after **every** physical change. **Moving a dongle to a different USB port reassigns its
 station** (the name follows the port, not the dongle) — that's the intended, stable behaviour for a
 fixed appliance, but it means you must keep each dongle in its assigned port.
+
+
+---
+
+**Related:** [`first-boot.md`](first-boot.md) (the full bring-up runbook) · [`config-reference.md`](config-reference.md) (every config key).

@@ -13,7 +13,7 @@ Secrets are **never** in this file — credentials are referenced by environment
 
 | Field | Required | Default | Notes |
 |---|---|---|---|
-| `state_dir` | yes | — | Mutable-state root (generated schedules) — keep **off the boot SD** (A6); must equal the systemd `StateDirectory`. |
+| `state_dir` | yes | — | Mutable-state root (generated schedules) — must equal the systemd `StateDirectory` path **`/var/lib/pirate-radio`** (the example ships this). Keep **off the boot SD** (A6) via SSD boot or an fstab mount over `/var/lib` — see [`first-boot.md`](first-boot.md) §6. |
 | `stations` | yes | — | ≥1 station object (below). |
 | `llm` | yes | — | Default LLM config (per-station `llm` can override). |
 | `tts_providers` | no | `{}` | Shared TTS backend setup (`piper`/`espeak`/`elevenlabs` → their params). |

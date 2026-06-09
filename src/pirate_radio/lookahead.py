@@ -11,7 +11,7 @@ quantities once at boot from the resolved config + each station's schedule:
   C1) against a **FIXED** byte budget (``LOOKAHEAD_RAM_BUDGET_BYTES`` — sized for the 4 GB /
   4-station target, NOT a ``psutil`` fraction that varies per boot and is unreproducible at 3am).
 - **stagger** — a deterministic per-station initial render delay (no RNG) so N stations don't fire
-  Piper/cloud renders on the same tick (the 4-core thundering herd, synchronized top-of-hour IDs).
+  Piper/cloud renders on the same tick (the 4-core thundering herd at clock-hour/block boundaries).
 - **worst-case render** — Σ chain timeouts, used to decide the cold-start startup WARNING.
 
 Everything here is pure (no clock, no IO, no hardware) — the coordinator (P4-6b) wires it.
@@ -57,8 +57,9 @@ def worst_consecutive_patter(items: Sequence[ScheduleItem]) -> int:
 
     A ``TrackItem`` resets the run; everything else (station_id / block_transition / block_reminder
     / future intro/outro/factoid patter) extends it. The generator's realistic worst case is 2
-    (``block_transition`` + ``station_id`` at a top-of-hour boundary); the day's opening cluster has
-    no preceding track to mask it (the day-roll-prewarm motivation lives in the coordinator)."""
+    (``block_transition`` + ``station_id`` at a clock-hour/block boundary); the day's opening
+    cluster has no preceding track to mask it (the day-roll-prewarm motivation lives in the
+    coordinator)."""
     worst = run = 0
     for item in items:
         run = 0 if isinstance(item, TrackItem) else run + 1

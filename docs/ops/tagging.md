@@ -98,3 +98,8 @@ touch /srv/pirate/station1 && sudo systemctl restart pirate-radio
 | `--limit N` | tag at most N files (stable order) |
 | `--min-score` | AcoustID confidence floor (default 0.85) |
 | `--log-level` | default INFO |
+
+
+---
+
+**Related:** [`first-boot.md`](first-boot.md) (the full bring-up runbook) · [`config-reference.md`](config-reference.md) (every config key).
