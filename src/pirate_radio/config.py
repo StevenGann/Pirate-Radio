@@ -178,6 +178,20 @@ class StationConfig(BaseModel):
         return self
 
 
+class ControlConfig(BaseModel):
+    """The FastAPI control plane (Phase 6, D4). Absent in config => the API is OFF (safe default —
+    a Pi 3 / a closed deployment runs no control plane). Present => it binds ``host:port`` (default
+    loopback only; a LAN bind is an explicit choice) and authenticates with the bearer token read
+    from ``token_env`` (H22 — by name, never in the config/logs)."""
+
+    model_config = _FROZEN
+    enabled: bool = True
+    host: str = "127.0.0.1"  # loopback by default; never 0.0.0.0 without the operator's intent
+    port: int = Field(default=8080, ge=1, le=65535)
+    token_env: str = "PIRATE_API_TOKEN"
+    log_ring_size: int = Field(default=2000, ge=1)  # the bounded /logs ring (R8′ deviation)
+
+
 class DaemonConfig(BaseModel):
     model_config = _FROZEN
     llm: LLMConfig
@@ -187,6 +201,7 @@ class DaemonConfig(BaseModel):
     tts_timeout_seconds: float = Field(default=30.0, gt=0)  # H14
     state_dir: Path  # A6: mutable-state root (schedules, future resume/cache) off the boot SD
     stations: tuple[StationConfig, ...] = Field(min_length=1)
+    control: ControlConfig | None = None  # Phase 6: None => no control API (off by default)
 
     # Typed views of tts_providers, parsed once at validation (R16). A PrivateAttr so it is
     # copied by model_copy and stays out of serialization; the raw dict above is the wire form.

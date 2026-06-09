@@ -92,3 +92,55 @@ def test_regenerate_one_station_passes_the_name() -> None:
     rec = _Recorder()
     main(["--config", "/c.json", "--regenerate", "Pi0"], deps=_deps(rec))
     assert rec.coord.regen_calls == ["Pi0"] and not rec.ran_coro
+
+
+# ---- daemon run + crash-isolated API (P6-5) -----------------------------------------------
+async def test_isolated_swallows_a_task_crash() -> None:
+    from pirate_radio.__main__ import _isolated
+
+    async def _boom() -> None:
+        raise RuntimeError("api down")
+
+    await _isolated(_boom(), name="control-api")  # MUST NOT raise (broadcast must survive)
+
+
+async def test_run_daemon_api_crash_does_not_stop_the_broadcast() -> None:
+    import asyncio
+
+    from pirate_radio.__main__ import _run_daemon
+
+    ran: list[str] = []
+
+    class _Coord:
+        async def run(self) -> None:
+            ran.append("started")
+            await asyncio.sleep(0.01)
+            ran.append("finished")
+
+    async def _api_boom() -> None:
+        raise RuntimeError("api down")
+
+    await _run_daemon(_Coord(), api_coro=_api_boom())  # type: ignore[arg-type]
+    assert ran == ["started", "finished"]  # the broadcast ran to completion despite the API crash
+
+
+def test_main_builds_the_api_when_a_factory_is_provided() -> None:
+    rec = _Recorder()
+    built: list = []
+
+    def _build_api(config, coordinator):  # noqa: ANN001
+        built.append((config, coordinator))
+        return None  # disabled-equivalent for this test; _run_daemon then runs only the broadcast
+
+    deps = _deps(rec)
+    deps = MainDeps(  # rebuild with build_api set
+        configure_logging=deps.configure_logging,
+        load_config=deps.load_config,
+        resolver=deps.resolver,
+        clock=deps.clock,
+        coordinator_factory=deps.coordinator_factory,
+        run=deps.run,
+        build_api=_build_api,
+    )
+    main(["--config", "/c.json"], deps=deps)
+    assert len(built) == 1  # main consulted the API factory

@@ -253,3 +253,12 @@ async def test_regenerate_station_offloads_under_the_regen_lock(tmp_path) -> Non
     station.regen_lock.release()
     await task
     assert offloaded  # ran only after the lock was free (serialized vs midnight)
+
+
+def test_build_control_service_is_wired_to_the_coordinator(tmp_path) -> None:
+    # P6-5: the coordinator builds a ControlService over its registry + skip/regenerate actions.
+    coord = _coord(tmp_path)
+    svc = coord.build_control_service()
+    assert [v.name for v in svc.list_stations()] == ["Pi0", "Pi1"]
+    svc.skip("Pi0")  # the service's skip routes to the coordinator -> the station's skip Event
+    assert coord.stations[0]._skip.is_set()

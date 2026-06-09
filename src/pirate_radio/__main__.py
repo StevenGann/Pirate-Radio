@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +24,8 @@ from pirate_radio.audio_devices import AudioDeviceResolver
 from pirate_radio.clock import Clock
 from pirate_radio.config import DaemonConfig
 from pirate_radio.coordinator import Coordinator
+
+logger = logging.getLogger(__name__)
 
 _NO_REGEN = (
     object()
@@ -40,6 +43,8 @@ class MainDeps:
     coordinator_factory: Callable[[DaemonConfig], Coordinator]
     run: Callable[[Coroutine[Any, Any, None]], None]
     preflight: bool = True
+    # Phase 6: build the control-API serve coroutine (or None if disabled). None -> no API.
+    build_api: Callable[[DaemonConfig, Coordinator], Coroutine[Any, Any, None] | None] | None = None
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
@@ -68,8 +73,31 @@ def main(argv: list[str], *, deps: MainDeps) -> int:
     if args.regenerate is not _NO_REGEN:
         coordinator.regenerate_now(args.regenerate or None)  # "" -> all; NAME -> that one
         return 0
-    deps.run(coordinator.run())
+    api_coro = deps.build_api(config, coordinator) if deps.build_api is not None else None
+    deps.run(_run_daemon(coordinator, api_coro=api_coro))
     return 0
+
+
+async def _run_daemon(
+    coordinator: Coordinator, *, api_coro: Coroutine[Any, Any, None] | None
+) -> None:
+    """Run the broadcast and (if enabled) the control API concurrently. The API is
+    **crash-isolated** so an API failure NEVER cancels ``coordinator.run()`` — the broadcast
+    outlives the control plane (H-A5)."""
+    if api_coro is None:
+        await coordinator.run()
+        return
+    await asyncio.gather(coordinator.run(), _isolated(api_coro, name="control-api"))
+
+
+async def _isolated(coro: Coroutine[Any, Any, None], *, name: str) -> None:
+    """Await ``coro``; swallow+log any non-cancellation failure so it can't cancel a sibling."""
+    try:
+        await coro
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - the broadcast must outlive an API crash (H-A5)
+        logger.error("%s task crashed (broadcast continues): %s", name, exc)
 
 
 def _prod_deps() -> MainDeps:  # pragma: no cover - the hardware/asyncio-run wiring (R20/R21)
@@ -103,6 +131,25 @@ def _prod_deps() -> MainDeps:  # pragma: no cover - the hardware/asyncio-run wir
             sink_factory=sink_factory,
         )
 
+    def build_api(
+        config: DaemonConfig, coordinator: Coordinator
+    ) -> Coroutine[Any, Any, None] | None:
+        control = config.control
+        if control is None or not control.enabled:
+            return None  # control plane off (default)
+        from pirate_radio.control.api import create_app
+        from pirate_radio.control.logs import RingLogHandler
+        from pirate_radio.control.server import serve
+
+        ring = RingLogHandler(maxsize=control.log_ring_size)
+        logging.getLogger().addHandler(ring)  # capture records for GET /logs (the R8′ ring)
+        app = create_app(
+            service=coordinator.build_control_service(),
+            log_ring=ring,
+            token_env=control.token_env,
+        )
+        return serve(app, host=control.host, port=control.port)
+
     return MainDeps(
         configure_logging=configure_logging,
         load_config=load_config,
@@ -110,6 +157,7 @@ def _prod_deps() -> MainDeps:  # pragma: no cover - the hardware/asyncio-run wir
         clock=clock,
         coordinator_factory=coordinator_factory,
         run=asyncio.run,
+        build_api=build_api,
     )
 
 

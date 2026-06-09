@@ -26,6 +26,10 @@ import os
 from collections.abc import Awaitable, Callable
 from datetime import date
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pirate_radio.control.service import ControlService
 
 from pirate_radio.audio.buffer import DEFAULT_SAMPLE_RATE, AudioBuffer
 from pirate_radio.audio.decode import Decoder
@@ -146,6 +150,35 @@ class Coordinator:
         async with station.regen_lock:
             await self._offload(station.prepare_next_day, force=True)
         logger.info("regenerated %s on request (effective next day-roll/restart)", name)
+
+    def build_control_service(self) -> ControlService:
+        """Wire a ``ControlService`` from the live coordinator state for the control API (P6-5):
+        the shared registry, per-name configs, the clock, an on-disk schedule reader, and the
+        ``skip``/``regenerate_station`` actions. The API owns the log ring separately."""
+        from pirate_radio.control.service import ControlService
+        from pirate_radio.errors import StateCorruptionError
+        from pirate_radio.persistence import load_with_recovery
+        from pirate_radio.schedule.models import SCHEDULE_SCHEMA_VERSION
+
+        configs = {s.name: s for s in self._config.stations}
+
+        def _load(name: str, day: date) -> DailySchedule | None:
+            path = self._config.state_dir / name / f"{day.isoformat()}.json"
+            try:
+                return load_with_recovery(
+                    path, DailySchedule, schema_version=SCHEDULE_SCHEMA_VERSION
+                )
+            except StateCorruptionError:
+                return None  # absent/corrupt -> the API reports "no schedule for that date"
+
+        return ControlService(
+            registry=self.registry,
+            configs=configs,
+            clock=self._clock,
+            load_schedule=_load,
+            skip=self.skip,
+            regenerate=self.regenerate_station,
+        )
 
     # ---- build-once -----------------------------------------------------------------------
     def _build_decoder(self) -> Decoder:  # pragma: no cover - the real-decoder boot line (R20-ish)

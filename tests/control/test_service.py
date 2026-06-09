@@ -203,3 +203,6 @@ async def test_regenerate_unknown_station_raises_before_invoking() -> None:
     with pytest.raises(StationNotFound):
         await _service(regenerate=_regen).regenerate("Nope")
     assert seen == []
+
+
+# ---- coordinator-built service (P6-5 wiring) is exercised in tests/test_coordinator.py ------
