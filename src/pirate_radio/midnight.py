@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime, time, timedelta, tzinfo
 from typing import Protocol, runtime_checkable
 from zoneinfo import ZoneInfo
@@ -72,10 +72,21 @@ class DayRollable(Protocol):
 class MidnightTask:
     """Sleeps to each midnight, then rolls every station's schedule (isolated, file-then-event)."""
 
-    def __init__(self, *, stations: Sequence[DayRollable], clock: Clock, sleeper: Sleeper) -> None:
+    def __init__(
+        self,
+        *,
+        stations: Sequence[DayRollable],
+        clock: Clock,
+        sleeper: Sleeper,
+        offload: Callable[..., Awaitable[object]] = asyncio.to_thread,
+    ) -> None:
         self._stations = stations
         self._clock = clock
         self._sleeper = sleeper
+        # prepare_next_day generates a full day + fsync-heavy atomic write; run it OFF the event
+        # loop (R23) — done inline it stalls every station's sink for seconds at 00:00 nightly on a
+        # Pi, xrunning all stations at once (final-review DA HIGH). Mirrors regenerate_station.
+        self._offload = offload
 
     async def run(self) -> None:
         while True:
@@ -85,7 +96,7 @@ class MidnightTask:
             for station in self._stations:
                 try:
                     async with station.regen_lock:  # serialize vs an API --regenerate (P6-3)
-                        station.prepare_next_day()  # writes the new day's FILE (Q2: file ...)
+                        await self._offload(station.prepare_next_day)  # new day FILE, off the loop
                     station.signal_day_roll()  # ... THEN sets the day-roll Event
                     logger.info("midnight regen %s done", station.name)
                 except Exception as exc:  # noqa: BLE001 - per-station isolation (H-DA-1)

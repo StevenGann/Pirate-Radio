@@ -222,7 +222,7 @@ For the selected grid, walk a cursor through each slot in time order:
 
 Each placed element advances the cursor by its own duration **plus the transition silence** (`transition_silence_seconds`, default 2.0) — the hard-cut gap between elements (see §10). That silence is part of timing and of the fill calculation.
 
-Persist the result as `<schedule_dir>/generated/<YYYY-MM-DD>.json`, keeping generated artifacts separate from the hand-authored grids in the same directory.
+Persist the result as `<state_dir>/<station>/<YYYY-MM-DD>.json`. *(Correction adopted during implementation per A6: generated schedules live under the writable `state_dir`, per-station, NOT under `schedule_dir` — that keeps mutable artifacts off the read-only/SD content path and separate from the hand-authored grids. The original `<schedule_dir>/generated/…` wording is superseded.)*
 
 ### 8.5 Soft boundaries & long-form content
 

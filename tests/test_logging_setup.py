@@ -41,3 +41,13 @@ def test_installs_a_stdout_handler_with_a_named_format() -> None:
         logging.LogRecord("pirate_radio.x", logging.INFO, __file__, 1, "hi", None, None)
     )
     assert "pirate_radio.x" in formatted and "hi" in formatted  # name + message in the line
+
+
+def test_journald_stream_handler_scrubs_secrets(capsys) -> None:
+    # final-review Senior-Dev HIGH: the journald/stdout stream — not only the /logs ring — must
+    # scrub a secret embedded in a (third-party) log message before it reaches the operator's eyes.
+    configure_logging("INFO")
+    logging.getLogger("pirate_radio.x").warning("auth failed: Bearer sk-LEAKED99 rejected")
+    out = capsys.readouterr().out
+    assert "sk-LEAKED99" not in out  # scrubbed at the sink
+    assert "<redacted>" in out

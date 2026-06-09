@@ -246,7 +246,15 @@ Offline AcoustID/MusicBrainz batch tagger (`python -m pirate_radio.tagging`): fp
 ### Phase 6 — COMPLETE ✅
 The FastAPI control plane is built, full-seven reviewed, remediated, and green: `{success,data,error}` envelope; constant-time bearer auth (fail-fast on unset token, fail-closed on malformed); reads (stations/now/schedule) + write actions (skip-at-boundary, lock-serialized regenerate); bounded secret-scrubbing `/logs` ring (R8′ deviation, ratified); loopback-default + off-by-default; crash-isolated daemon task with a visible-death log line; operator runbook (`docs/ops/control-api.md`).
 
-- **RESUME POINT: the final full-team deep-dive code-quality + documentation review** (the overnight mandate's closer) — review the WHOLE assembled system (phases 0→6) for code quality + docs, then remediate.
+### Final full-team deep-dive (whole-system code-quality + documentation) — ✅ COMPLETE — `0063`
+Full-seven review of the assembled system (phases 0→6, 62 src files / ~6.6k LOC + docs). Round 1: CONFIRM ×3 (Old Man, RPi, QA), DISPUTE ×4 (Senior Dev, Fact Checker, DA, Field-Op). Remediated 2 CRITICAL + multiple HIGH, then **re-poll → all 7 CONFIRM**. Key fixes:
+- **Code:** journald stream now secret-scrubbed via a `SecretScrubFilter` + new leaf `scrub.py` (Senior Dev HIGH); midnight day-roll now offloads the schedule write OFF the event loop (DA HIGH — was a nightly all-station stall); graceful **SIGTERM shutdown** drains sinks via `__aexit__` + `TimeoutStopSec` (DA HIGH); `PrivateTmp=yes` keeps Piper/espeak temp WAVs off the SD (RPi HIGH); deleted dead poison-skip machinery + `PoisonItemError` + `worst_case_track_render` (Old Man HIGH); `errors.py` header refreshed.
+- **Docs:** new `docs/ops/grids.md` (grid schema + content layout — Field-Op CRITICAL ×2), RF **legality** notice on README + first-boot (Field-Op HIGH), README §Status → 0–6 complete + correct gate (Fact-Checker/Field-Op HIGH), design-doc §8.4 path correction, new `docs/ops/config-reference.md`, first-boot Recovery/troubleshooting + RAM note, config.example + .env.example fixes.
+- Carry-forwards (non-blocking): stale day-roll Event guard, station-reload lock, atomic-write convergence, dead `device_index`, reserved `max_requests_per_minute`.
+- Gate: **865 tests, 97.37% cov, ruff/ruff-format/mypy --strict clean (62 files).**
+
+## 🎉 OVERNIGHT BUILD MANDATE COMPLETE
+PiRate Radio is built through design-doc §20 **phases 0→6**, every phase committed + full-seven deep-dived, closed by the final whole-system code-quality + documentation review (unanimous 7/7 CONFIRM) and its remediation. A deployable multi-station FM broadcaster with an AI DJ, two-tier supervision, DST-correct day-roll, graceful shutdown, offline tagger, optional control API, and a complete operator runbook set (first-boot / grids / udev / tagging / control-api / config-reference).
 
 ### Final — deep-dive code-quality + documentation review  — ✅ COMPLETE (all 7 validated)
 - Manager-led pass `0010` (full team initially blocked by a transient provider rate-limit).

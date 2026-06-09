@@ -24,7 +24,7 @@
       "description": "the flagship channel",
       "schedule_dir": "/mnt/ssd/pirate-radio/schedules/pirate-one",
       "content_dir": "/mnt/ssd/pirate-radio/content/pirate-one",
-      "audio_device": "usb-port-1",
+      "audio_device": "pirate1",
       "dj_personality": "A warm, concise late-night host who never rambles.",
       "loudness_target_lufs": -16.0,
       "transition_silence_seconds": 2.0,

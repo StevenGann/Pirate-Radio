@@ -6,6 +6,13 @@ path `/opt/pirate-radio`.
 
 ## 0. Appliance prerequisites (24/7 hardware)
 
+> ⚠️ **Legality first — read before transmitting.** Operating an FM transmitter is **regulated and
+> often requires a licence**. In the US, unlicensed operation must stay within FCC Part 15
+> field-strength limits (very low power, a few hundred feet at most); most countries have an
+> equivalent rule, and higher power or multiple stations generally needs a licence. **Confirm what is
+> legal for your band, power, and location before you key up** — it is your responsibility, not the
+> software's. Wired or stream-only output (no RF) sidesteps this entirely.
+
 This is an always-on appliance, not a desktop. Before software:
 
 - **Active cooling** — a heatsink + fan. A passively-cooled Pi throttles under sustained encode/TTS.
@@ -14,6 +21,13 @@ This is an always-on appliance, not a desktop. Before software:
 - **Official PSU** — an undervolted Pi browns out under USB-audio + CPU load. Use the official supply.
 - **Powered USB hub** — the FM transmitter dongles draw more than the Pi's ports reliably provide;
   feed them from a powered hub.
+- **RAM headroom** — a **4 GB** Pi is the multi-station baseline (Pi 3 / 1 GB is a single-station
+  floor). The daemon fail-fasts at boot if the look-ahead **audio buffers** (≈ one decoded whole
+  track per buffered slot × stations × depth) won't fit its fixed budget; the error names the fix
+  (fewer stations, shorter longest track, or a higher budget). Note that budget covers the audio
+  buffers specifically — the Python/numpy/ffmpeg/Piper baseline adds a few hundred MB of RSS on top,
+  so leave headroom. One very long track (a live set, a podcast) drives the whole fleet's budget — if
+  boot rejects your RAM, check for an outlier-length file.
 
 ## 1. System packages
 
@@ -90,6 +104,11 @@ by systemd on start). If they differ, schedules write outside the unit-managed d
 and, if that path is on the boot SD, defeating the off-SD goal (A6). To enable the optional control
 API, add a `control` block here too — see `docs/ops/control-api.md` (off by default).
 
+**Before this step, lay out your content folders and write your grid files.** The radio plays what
+your grids schedule from your content groups, and the dry-run below validates both. If you have not
+done this yet, follow [`grids.md`](grids.md) (grid YAML schema, filename resolution, the
+`content_dir/<group>/` layout, accepted audio extensions, and a worked example) — then come back.
+
 Dry-run the schedule generation before going live (oneshot, does not start the daemon):
 
 ```
@@ -127,8 +146,40 @@ journalctl -u pirate-radio | grep -E 'backstop fired|render-poison'
 
 - **Regenerate after editing a grid:** re-run the `--regenerate` oneshot (optionally
   `--regenerate <station>` for just one). The **running daemon is unaffected** — it picks up a manual
-  regen on its next midnight day-roll or a `systemctl restart`.
+  regen on its next midnight day-roll or a `systemctl restart`. (See [`grids.md`](grids.md) for the
+  grid schema.)
+- **Add + tag content:** drop files into the right `content_dir/<group>/` folder and tag them — see
+  [`tagging.md`](tagging.md). Regenerate to pick them up.
+- **Status / control (optional):** if you enabled the control API, see
+  [`control-api.md`](control-api.md) for skip/regenerate/status/logs over an SSH tunnel.
 - **Logs:** `journalctl -u pirate-radio`. Restart/backoff/escalation, midnight regen done|FAILED, and
   backstop-fired events are all there, station-tagged.
 - **Schedules** live under `state_dir/<station>/<date>.json` and roll automatically at local midnight
   (DST-correct).
+
+## Recovery & troubleshooting
+
+A quick journald vocabulary, and what to do when things break unattended:
+
+| You see (`journalctl -u pirate-radio`) | Meaning | Action |
+|---|---|---|
+| `station <n> starting` → `on air` | normal bring-up | — |
+| `N/N ON AIR` (periodic) | all N stations up | — |
+| `backstop fired` (WARN, station-tagged) | a station is up but airing the R11 bumper | check that station's LLM/TTS reachability + content |
+| `render-poison` (CRITICAL) | an item repeatedly failed to render | inspect/replace the offending file |
+| `<n>: crashed … restart k/5` | a station crashed; supervisor is restarting it | watch for escalation |
+| `escalating to the systemd tier` | the in-process restart ceiling was hit | see "keeps crashing" below |
+| `control-api task crashed\|exited` | the control plane died (broadcast continues) | see [`control-api.md`](control-api.md) |
+
+- **The daemon keeps crashing / is in `failed` state.** After 5 crashes in 60s systemd stops
+  restarting and the unit enters a terminal **`failed`** state (so a human looks, instead of an
+  infinite flap). Check `systemctl status pirate-radio` (look for `start-limit-hit`), read the
+  journal for the cause (bad grid, missing content, unresolved `audio_device`, missing secret), fix
+  it, then **`sudo systemctl reset-failed pirate-radio && sudo systemctl start pirate-radio`**.
+- **Disk fills up.** Unattended for weeks, the journal + per-day schedules can fill the disk; writes
+  then fail and you'll see schedule-write/regen errors in the journal. Mitigate: keep `state_dir` on
+  the SSD (not the SD), cap the journal (`journalctl --vacuum-size=200M`, or set `SystemMaxUse=` in
+  `/etc/systemd/journald.conf`), and monitor with `df -h`.
+- **Stop / restart cleanly.** `sudo systemctl restart pirate-radio` — the daemon catches SIGTERM and
+  drains (closing the audio devices) before exiting, so a USB dongle is released cleanly for the
+  restart.

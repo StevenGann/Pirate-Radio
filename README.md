@@ -4,39 +4,54 @@ A Raspberry Pi + Python project: an automated, multi-station FM radio broadcaste
 with an optional AI DJ. See [`PiRate_Radio_Design_Doc.md`](PiRate_Radio_Design_Doc.md)
 for the full design (the panel-adopted §21 "Review Resolutions" govern).
 
+> ⚠️ **Legality first.** Operating an FM transmitter is **regulated and often requires a
+> licence**. In the US, unlicensed operation must stay within FCC Part 15 field-strength
+> limits (very low power / short range); most jurisdictions have an equivalent rule. Higher
+> power or multiple stations generally needs a licence. **Confirm what is legal for your
+> band, power, and location before you transmit** — that is the operator's responsibility,
+> not the software's. Wired / streaming-only use sidesteps RF entirely.
+
 ## Status
 
-🚧 **Phases 0–3 complete; building toward a deployable radio.** **Not yet a deployable
-radio** — there is no coordinator/supervisor, no midnight-regeneration loop, and no real
-audio output wired yet (those land in Phase 4). What exists today is the validated,
-fully-tested foundation through the single-station MVP slice **plus the full AI DJ**:
+✅ **Phases 0–6 complete — a deployable multi-station broadcaster.** Blank Raspberry Pi to
+"N/N ON AIR" via the [`docs/ops/first-boot.md`](docs/ops/first-boot.md) runbook. What exists:
 
-- **Phase 0 — complete:** config + fail-fast validation, content catalog scanner,
-  grid loader + validation, atomic durable JSON state, clock seam, error taxonomy,
-  the R10 audio-device-resolution seam.
-- **Phase 1 — complete:** schedule data models, the `AudioBuffer` type, the
-  provider-error taxonomy, DJ/audio Protocol seams + fakes, the seeded schedule
-  **generator** (R19), `find_now`/**resume** (R11 gap path + R12 re-anchor), the
-  look-ahead **playback pipeline** (R11 backstop, virtual-time-testable), the writable
-  `state_dir` (A6), and the mtime-cached catalog (A9).
-- **Phase 2 — complete (local voice):** real **ffmpeg decode**, **EBU R128 loudness**
-  normalization (`pyloudnorm`), **Piper + espeak-ng** TTS behind the existing Protocols,
-  scipy resampling to one station format, startup **binary preflight**, and loudness-normalized
-  gapless playback.
-- **Phase 3 — complete (the AI DJ):** a **grounded LLM → TTS** patter path behind the unchanged
-  Phase-1 Protocols — a typed `DjContext` (R16) → "invent nothing" prompts → **Claude / DeepSeek /
-  Ollama** text backends, **ranked provider failover** for both LLM and TTS (skip-on-Fatal, a
-  *total* floor that never lets a backend bug crash the producer), **ElevenLabs** cloud TTS (D5),
-  and producer wiring that keeps the §9.3 "never dead air" floor (every track still plays; empty
-  patter degrades to a template line; whole-chain exhaustion → the R11 backstop). The network path
-  is lazily imported and **never touched on the CI/test path** (R21) — every backend's prompt-build,
-  response-parse, error-map, and failover logic is fully unit-tested with fakes. Still **not a
-  deployable radio** — the multi-station coordinator/supervisor, midnight regeneration, systemd
-  units, and real audio output land in Phase 4.
+- **Phase 0:** config + fail-fast validation, content catalog scanner, grid loader +
+  validation, atomic durable JSON state, clock seam, error taxonomy, the R10
+  audio-device-resolution seam.
+- **Phase 1:** schedule data models, the `AudioBuffer` type, the provider-error taxonomy,
+  DJ/audio Protocol seams + fakes, the seeded schedule **generator** (R19),
+  `find_now`/**resume** (R11 gap path + R12 re-anchor), the look-ahead **playback pipeline**
+  (R11 backstop, virtual-time-testable), the writable `state_dir` (A6), the mtime-cached
+  catalog (A9).
+- **Phase 2 (local voice):** real **ffmpeg decode**, **EBU R128 loudness** normalization
+  (`pyloudnorm`), **Piper + espeak-ng** TTS behind the Protocols, scipy resampling, startup
+  **binary preflight**, loudness-normalized gapless playback.
+- **Phase 3 (the AI DJ):** a **grounded LLM → TTS** patter path — a typed `DjContext` (R16) →
+  "invent nothing" prompts → **Claude / DeepSeek / Ollama** text backends, **ranked provider
+  failover** for LLM and TTS (a *total* floor that never lets a backend bug crash the producer),
+  **ElevenLabs** cloud TTS (D5). The network path is lazily imported and **never touched on the
+  CI/test path** (R21).
+- **Phase 4 (multi-station):** the **coordinator** (build-once shared services, look-ahead RAM
+  fail-fast, deterministic render stagger), the **supervisor** (restart-to-known-good, sibling
+  isolation, consecutive-restart ceiling → systemd), the real **`SoundDeviceSink`**, the **udev
+  port→station resolver**, the **DST-correct midnight day-roll**, the `python -m pirate_radio`
+  daemon + **systemd unit**, graceful SIGTERM shutdown.
+- **Phase 5 (offline tagger):** an AcoustID/MusicBrainz batch tagger
+  (`python -m pirate_radio.tagging`) — fingerprint → rate-limited lookups → thresholded
+  fill-not-overwrite → atomic tag write, per-file isolation. No new Python dependency.
+- **Phase 6 (control API):** an optional FastAPI control plane (off by default, loopback-bound,
+  bearer-auth) — status reads + skip/regenerate + a bounded in-memory `/logs` ring,
+  crash-isolated from the broadcast. See [`docs/ops/control-api.md`](docs/ops/control-api.md).
 
-Live status and the resume point are in [`docs/BUILD-LOG.md`](docs/BUILD-LOG.md).
+Live status and the build history are in [`docs/BUILD-LOG.md`](docs/BUILD-LOG.md).
 
 ## Configuration
+
+The full `config.json` field reference (every key, default, and range) is in
+[`docs/ops/config-reference.md`](docs/ops/config-reference.md); the content model (grids + content
+folders) is in [`docs/ops/grids.md`](docs/ops/grids.md). Start from
+[`config.example.json`](config.example.json).
 
 Secrets and a couple of operational knobs come from the process environment — see
 [`.env.example`](.env.example) for the full list. `config.json` references the credential
@@ -166,10 +181,10 @@ mypy
 pytest -m "not hardware and not network"
 ```
 
-Current gate: ruff + mypy clean, **566 tests**, ~99% coverage. CI runs `-m "not hardware and not
-network"`: hardware-dependent code and the live LLM/TTS smokes are excluded, and **no CI test
-imports a provider SDK or opens a socket** (R21) — the network path is lazily imported and proven
-absent by import-guard tests.
+Current gate: ruff + ruff-format + mypy `--strict` clean, **865 tests**, ~97% coverage. CI runs
+`-m "not hardware and not network"`: hardware-dependent code and the live LLM/TTS smokes are
+excluded, and **no CI test imports a provider SDK or opens a socket** (R21) — the network path is
+lazily imported and proven absent by import-guard tests.
 
 ### Testing philosophy
 
@@ -189,6 +204,6 @@ exist only to validate the real wire shape on a deployment.
 Design and implementation decisions are made by a standing seven-agent review panel
 (brief → distill → vote) coordinated through a manager loop. The full audit trail —
 design review, per-phase plans, and per-increment votes — is in
-[`docs/decisions/`](docs/decisions/) (`0001`–`0031`) and
+[`docs/decisions/`](docs/decisions/) (`0001`–`0063`) and
 [`docs/agents/README.md`](docs/agents/README.md). Implementation plans live in
 [`docs/plans/`](docs/plans/).

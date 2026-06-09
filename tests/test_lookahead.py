@@ -20,7 +20,6 @@ from pirate_radio.audio.buffer import DEFAULT_SAMPLE_RATE
 from pirate_radio.catalog.models import Track
 from pirate_radio.errors import ConfigError
 from pirate_radio.lookahead import (
-    _DECODE_TIMEOUT_DEFAULT,
     _LLM_TIMEOUT_DEFAULT,
     _LOOKAHEAD_RAM_BUDGET_BYTES,
     _RESIDENT_SLACK_SLOTS,
@@ -32,7 +31,6 @@ from pirate_radio.lookahead import (
     stagger_offset,
     track_buffer_bytes,
     worst_case_patter_render,
-    worst_case_track_render,
     worst_consecutive_patter,
 )
 from pirate_radio.schedule.models import (
@@ -265,19 +263,9 @@ def test_worst_case_patter_render_empty_chains_is_zero() -> None:
     assert worst_case_patter_render([], []) == 0.0
 
 
-def test_worst_case_track_render_is_the_decode_timeout() -> None:
-    assert worst_case_track_render(decode_timeout=120.0) == 120.0
-
-
-def test_worst_case_track_render_default_is_the_named_constant() -> None:
-    # QA #1: the bare call uses the named default (config decode_timeout_seconds default = 120.0)
-    assert worst_case_track_render() == _DECODE_TIMEOUT_DEFAULT == 120.0
-
-
 def test_named_constants_are_the_documented_fixed_values() -> None:
     # Old-Man/RPi condition: a FIXED budget (not a psutil fraction), reproducible at 3am.
     assert _LOOKAHEAD_RAM_BUDGET_BYTES == 1_600_000_000  # ~1.6 GB ≈ 40% of a 4 GB Pi
     assert _STAGGER_STEP_SECONDS == 2.0
     assert _LLM_TIMEOUT_DEFAULT == 20.0
     assert _TTS_TIMEOUT_DEFAULT == 30.0
-    assert _DECODE_TIMEOUT_DEFAULT == 120.0

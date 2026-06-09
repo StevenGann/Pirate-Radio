@@ -50,7 +50,6 @@ _RESIDENT_SLACK_SLOTS = 2
 # .tts_timeout_seconds=30, .decode_timeout_seconds=120) and are the fallbacks when none is passed.
 _LLM_TIMEOUT_DEFAULT = 20.0
 _TTS_TIMEOUT_DEFAULT = 30.0
-_DECODE_TIMEOUT_DEFAULT = 120.0
 
 
 def worst_consecutive_patter(items: Sequence[ScheduleItem]) -> int:
@@ -80,8 +79,8 @@ def track_buffer_bytes(
     """Bytes for ONE whole-track float32 ``AudioBuffer`` of ``seconds`` PLAYED duration.
 
     NB: ``seconds`` is the longest track's *played duration* (what sits decoded in the buffer),
-    which is distinct from the decode *timeout* used by ``worst_case_track_render`` — do not
-    conflate the two (a decode timeout sizes a render stall, not a buffer)."""
+    which is distinct from the decode *timeout* (a decode timeout sizes a render stall, not a
+    buffer) — do not conflate the two."""
     return int(seconds * sample_rate * channels * _BYTES_PER_FLOAT32)
 
 
@@ -151,8 +150,3 @@ def worst_case_patter_render(llm_timeouts: Sequence[float], tts_timeouts: Sequen
     """PURE worst-case seconds to render one patter item: Σ LLM-chain timeouts + Σ TTS-chain
     timeouts (each backend can hang its full timeout before the ranked chain fails over, Q5/H14)."""
     return sum(llm_timeouts) + sum(tts_timeouts)
-
-
-def worst_case_track_render(*, decode_timeout: float = _DECODE_TIMEOUT_DEFAULT) -> float:
-    """PURE worst-case seconds to render one track: the decode timeout (a hung decode burns it)."""
-    return decode_timeout

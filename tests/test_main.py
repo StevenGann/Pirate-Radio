@@ -9,6 +9,7 @@ coordinator, then either run the daemon or — for ``--regenerate`` — force-re
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass, field
 
 from pirate_radio.__main__ import MainDeps, main
@@ -140,6 +141,34 @@ async def test_run_daemon_api_crash_does_not_stop_the_broadcast() -> None:
 
     await _run_daemon(_Coord(), api_coro=_api_boom())  # type: ignore[arg-type]
     assert ran == ["started", "finished"]  # the broadcast ran to completion despite the API crash
+
+
+async def test_run_daemon_drains_the_broadcast_on_shutdown() -> None:
+    # P6-final / DA HIGH: on shutdown the runner is cancelled and the cancellation must reach
+    # coordinator.run() so each station's `async with self._sink` unwinds through __aexit__ (the
+    # audio device closes cleanly) instead of Python's hard-terminate-on-SIGTERM. We drive the
+    # cancellation directly (the signal-handler wiring is the real-deploy path); the drain is what
+    # must be pinned.
+    import asyncio
+
+    from pirate_radio.__main__ import _run_daemon
+
+    drained: list[str] = []
+
+    class _Coord:
+        async def run(self) -> None:
+            try:
+                await asyncio.Event().wait()  # run forever until cancelled
+            except asyncio.CancelledError:
+                drained.append("sink closed")  # stands in for the station sink __aexit__
+                raise
+
+    task = asyncio.create_task(_run_daemon(_Coord(), api_coro=None))  # type: ignore[arg-type]
+    await asyncio.sleep(0.02)
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+    assert drained == ["sink closed"]  # the broadcast unwound cleanly, not hard-killed
 
 
 def test_main_builds_the_api_when_a_factory_is_provided() -> None:

@@ -1,12 +1,10 @@
 """RED tests for ``pirate_radio.supervisor`` — Phase 4 plan §C / P4-3 (R7 tier-2).
 
 The in-process supervisor restarts a crashed station to known-good state (re-entering ``run()``),
-with **sibling isolation**, backoff via the injected ``Sleeper``, **advance-past-poison keyed on
-the producer-tagged item INDEX** (per-index counting; a render-poison item is skipped after K
-crashes; a **bounded skip budget** prevents an all-poison schedule from skipping forever), a
-**consecutive-restart ceiling → injected ``on_escalate``** (never a real exit), and
-**multi-pattern secret-scrubbed** crash logs. A poison unit that cannot be skipped escalates via
-the ceiling (never an infinite loop). Native SIGSEGV is the systemd tier's job (R7), not here.
+with **sibling isolation**, backoff via the injected ``Sleeper``, a **consecutive-restart ceiling →
+injected ``on_escalate``** (never a real exit), and **multi-pattern secret-scrubbed** crash logs.
+(Render-poison is handled IN-BAND by the producer, so no item ever escapes to the supervisor; there
+is no skip path.) Native SIGSEGV is the systemd tier's job (R7), not here.
 """
 
 from __future__ import annotations
@@ -16,7 +14,6 @@ import logging
 
 import pytest
 
-from pirate_radio.errors import PoisonItemError
 from pirate_radio.pipeline.timing import VirtualSleeper
 from pirate_radio.supervisor import Supervisable, Supervisor, scrub_secrets
 
@@ -37,39 +34,6 @@ class _Unit:
             raise self._exc
 
 
-class _PoisonUnit:
-    """Raises ``PoisonItemError`` for the first not-yet-skipped index (in order) until all are
-    skipped — then ``run()`` completes. Models a render-poison schedule (skip by exc index)."""
-
-    def __init__(self, name: str, *, indices: list[int]) -> None:
-        self.name = name
-        self._indices = indices
-        self._skipped: set[int] = set()
-        self.runs = 0
-
-    async def run(self) -> None:
-        self.runs += 1
-        for idx in self._indices:
-            if idx not in self._skipped:
-                raise PoisonItemError(idx, RuntimeError("decoder segfault surfaced"))
-
-    def skip_item(self, index: int) -> None:
-        self._skipped.add(index)
-
-
-class _NoSkipPoisonUnit:
-    """A poison unit WITHOUT a ``skip_item`` method (the Protocol permits this)."""
-
-    def __init__(self, name: str, *, index: int) -> None:
-        self.name = name
-        self._index = index
-        self.runs = 0
-
-    async def run(self) -> None:
-        self.runs += 1
-        raise PoisonItemError(self._index, RuntimeError("unskippable poison"))
-
-
 def _supervisor(**kw) -> Supervisor:
     calls: list[str] = []
     kw.setdefault("on_escalate", lambda: calls.append("escalate"))
@@ -82,7 +46,6 @@ def _supervisor(**kw) -> Supervisor:
 # ---- Protocol ------------------------------------------------------------------------------
 def test_unit_satisfies_supervisable() -> None:
     assert isinstance(_Unit("s"), Supervisable)
-    assert isinstance(_NoSkipPoisonUnit("s", index=0), Supervisable)  # skip_item NOT required
 
 
 # ---- restart-to-known-good -----------------------------------------------------------------
@@ -144,51 +107,6 @@ async def test_units_run_concurrently_not_serially() -> None:
         [_Rendezvous("a", a_started, b_started), _Rendezvous("b", b_started, a_started)]
     )
     assert a_started.is_set() and b_started.is_set()  # both ran at the same time
-
-
-# ---- advance-past-poison: per-index counting + recovery -----------------------------------
-async def test_poison_item_skipped_after_threshold_then_recovers(caplog) -> None:
-    unit = _PoisonUnit("s", indices=[2])
-    sup = _supervisor(poison_threshold=3, max_consecutive_restarts=99, max_skips=10)
-    with caplog.at_level(logging.CRITICAL):
-        await sup.run([unit])
-    assert 2 in unit._skipped and unit.runs == 4 and not sup._escalations
-    # the skip is logged CRITICAL, naming the index (operator visibility, §C)
-    assert any(r.levelname == "CRITICAL" and "2" in r.getMessage() for r in caplog.records)
-
-
-async def test_poison_counting_is_per_index_not_global() -> None:
-    # DA G1: a GLOBAL crash counter would skip index 5 prematurely; per-index counting must not.
-    # index 2 crashes to threshold (skipped); index 5 has only crashed fewer times (NOT skipped).
-    unit = _PoisonUnit("s", indices=[2, 5])
-    sup = _supervisor(poison_threshold=3, max_consecutive_restarts=99, max_skips=10)
-    # stop early by capping skips so we can inspect mid-flight is hard; instead use a threshold
-    # high enough that 5 never reaches it within the run: after 2 is skipped, 5 starts crashing.
-    # With indices=[2,5]: runs 1-3 crash on 2 (poison[2]=3 -> skip 2). Then runs 4-6 crash on 5
-    # (poison[5]=3 -> skip 5). run 7 completes. A GLOBAL counter would skip after 3 TOTAL -> wrongly
-    # skip whatever index was current at crash 3 and never count 5 independently.
-    await sup.run([unit])
-    assert unit._skipped == {2, 5}  # both reached their OWN per-index threshold
-    assert unit.runs == 7  # 3 (idx2) + 3 (idx5) + 1 success — proves independent per-index counts
-
-
-# ---- poison without skip_item -> escalates via the ceiling (NEVER infinite-loops) ----------
-async def test_unskippable_poison_escalates_via_ceiling() -> None:
-    unit = _NoSkipPoisonUnit("s", index=0)  # poison forever, cannot be skipped
-    sup = _supervisor(poison_threshold=3, max_consecutive_restarts=4, max_skips=10)
-    await sup.run([unit])
-    assert sup._escalations == ["escalate"] and unit.runs == 4  # bounded, then escalate
-
-
-# ---- bounded skip budget -> an all-poison schedule escalates, never skips forever ----------
-async def test_skip_budget_exhaustion_escalates() -> None:
-    # DA G4: every index is poison; without a budget the supervisor would skip forever (a slow
-    # all-backstop loop, no alarm). The skip budget caps it -> escalate to systemd.
-    unit = _PoisonUnit("s", indices=[0, 1, 2, 3, 4, 5])
-    sup = _supervisor(poison_threshold=1, max_consecutive_restarts=99, max_skips=3)
-    await sup.run([unit])
-    assert sup._escalations == ["escalate"]  # skip budget (3) exhausted -> escalate
-    assert len(unit._skipped) <= 3  # never skipped past the budget
 
 
 # ---- ceiling -> escalate (injected, never a real exit) -------------------------------------

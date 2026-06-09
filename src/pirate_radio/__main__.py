@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import logging
+import signal
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from pathlib import Path
@@ -81,13 +83,38 @@ def main(argv: list[str], *, deps: MainDeps) -> int:
 async def _run_daemon(
     coordinator: Coordinator, *, api_coro: Coroutine[Any, Any, None] | None
 ) -> None:
-    """Run the broadcast and (if enabled) the control API concurrently. The API is
-    **crash-isolated** so an API failure NEVER cancels ``coordinator.run()`` — the broadcast
-    outlives the control plane (H-A5)."""
+    """Run the broadcast and (if enabled) the control API concurrently, with a GRACEFUL shutdown on
+    SIGTERM/SIGINT. The API is **crash-isolated** so an API failure NEVER cancels the broadcast
+    (H-A5). On a signal (``systemctl stop``/``restart`` sends SIGTERM — the documented routine op)
+    the runner is cancelled so every ``async with self._sink`` in ``Station.run`` unwinds through
+    ``__aexit__`` and the audio device is closed cleanly, instead of Python's default
+    hard-terminate-on-SIGTERM that abandons the open PortAudio stream (final-review DA HIGH)."""
     if api_coro is None:
-        await coordinator.run()
-        return
-    await asyncio.gather(coordinator.run(), _isolated(api_coro, name="control-api"))
+        runner: asyncio.Future[Any] = asyncio.ensure_future(coordinator.run())
+    else:
+        runner = asyncio.gather(coordinator.run(), _isolated(api_coro, name="control-api"))
+
+    loop = asyncio.get_running_loop()
+    installed: list[signal.Signals] = []
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, runner.cancel)
+            installed.append(sig)
+        except (NotImplementedError, RuntimeError, ValueError):
+            pass  # no signal support here (non-Unix / not the main thread / a test loop)
+    try:
+        await runner
+    except asyncio.CancelledError:
+        # a signal cancelled the runner -> drain: let the station tasks unwind their sink __aexit__
+        logger.info("shutdown signal received; draining broadcast (closing audio devices)")
+        runner.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await runner
+        # clean shutdown: return normally (exit 0), do NOT re-raise
+    finally:
+        for sig in installed:
+            with contextlib.suppress(NotImplementedError, RuntimeError, ValueError):
+                loop.remove_signal_handler(sig)
 
 
 async def _isolated(coro: Coroutine[Any, Any, None], *, name: str) -> None:

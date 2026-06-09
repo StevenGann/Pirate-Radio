@@ -17,6 +17,10 @@ RestartSec=2
 # looks) instead of an infinite fast crash-loop. Pairs with the in-process supervisor's own ceiling.
 StartLimitIntervalSec=60
 StartLimitBurst=5
+# Graceful stop: SIGTERM (the default) is caught by the daemon, which drains and closes the audio
+# devices via the sink __aexit__ before exiting. Give the drain time before systemd SIGKILLs — an
+# abandoned PortAudio/ALSA handle on a USB dongle can refuse re-acquisition on a fast restart.
+TimeoutStopSec=15
 
 # Secrets (LLM/TTS api_key_env vars) come from a root-owned 0600 file — NEVER from this unit or the
 # config (H22). The daemon reads each by name at build; the value never touches logs or the repo.
@@ -27,6 +31,10 @@ Group=pirate
 ExecStart=/opt/pirate-radio/.venv/bin/python -m pirate_radio --config /etc/pirate-radio/config.json
 # Mutable state (schedules) lives off the boot SD card (A6); StateDirectory is created 0700.
 StateDirectory=pirate-radio
+# Piper/espeak write a per-render temp WAV; PrivateTmp gives the service its own tmpfs-backed /tmp so
+# those writes never touch the boot SD (A6/H26) — on Bookworm /tmp is NOT tmpfs by default
+# (final-review RPi HIGH). This also isolates the daemon's temp files from the rest of the system.
+PrivateTmp=yes
 
 [Install]
 WantedBy=multi-user.target

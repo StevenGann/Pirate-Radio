@@ -136,7 +136,9 @@ class Coordinator:
         # The midnight task rolls every station's schedule at 00:00 (DST-correct, per-station
         # isolated, file-then-event). It shares the Stations' own day-roll Events (§E/Q2) and their
         # per-station regen lock (so an API --regenerate never races the roll, P6-3).
-        self._midnight = MidnightTask(stations=self.stations, clock=clock, sleeper=sleeper)
+        self._midnight = MidnightTask(
+            stations=self.stations, clock=clock, sleeper=sleeper, offload=self._offload
+        )
 
     # ---- control-API actions (P6-3) -------------------------------------------------------
     def skip(self, name: str) -> None:

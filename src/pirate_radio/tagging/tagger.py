@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Protocol
 
 from pirate_radio.errors import TaggingError
-from pirate_radio.supervisor import scrub_secrets
+from pirate_radio.scrub import scrub_secrets
 from pirate_radio.tagging.models import AcoustIdMatch, Fingerprint, RecordingMetadata, TagPlan
 from pirate_radio.tagging.selection import _MIN_ACOUSTID_SCORE, best_match, choose_best
 from pirate_radio.tagging.tag_writer import apply_tag_plan, read_existing_tags

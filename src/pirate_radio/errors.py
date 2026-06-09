@@ -1,12 +1,12 @@
-"""Phase-0 exception hierarchy for PiRate Radio.
+"""The project-wide exception hierarchy for PiRate Radio.
 
 A single project root (``PirateRadioError``) lets callers catch everything from the
-package with one ``except``. Phase-0 leaf types cover the failure classes this phase
-can raise: config, grid validation, grid resolution, catalog scanning, and
-persisted-state corruption. The provider/failover taxonomy (R15: ``ProviderError``
--> ``ProviderUnavailable``/``ProviderQuotaExceeded``/``ProviderFatal``) is
-intentionally NOT here yet — it is Phase 3 and will attach under
-``PirateRadioError`` without disturbing these leaves.
+package with one ``except``. The assembled taxonomy (phases 0–6): config / grid
+validation / grid resolution / catalog scanning / persisted-state corruption leaves;
+the provider/failover subtree (R15: ``ProviderError`` -> ``ProviderUnavailable`` /
+``ProviderQuotaExceeded`` / ``ProviderFatal``, used by the ranked-failover layer and
+the R11 backstop); and the offline-tagger subtree (``TaggingError`` ->
+``TaggingUnavailable`` / ``TaggingThrottled`` / ``TaggingFatal``).
 
 Validators raise the *most specific* leaf, and every message is actionable and
 free of secrets (security rule). ``StateCorruptionError`` is the only leaf carrying
@@ -56,22 +56,6 @@ class StateCorruptionError(PirateRadioError):
     def __init__(self, message: str, *, path: Path) -> None:
         super().__init__(message)
         self.path = path
-
-
-class PoisonItemError(PirateRadioError):
-    """A schedule item whose render crashed with a NON-``ProviderError`` exception (a C-level
-    decode crash surfaced as a Python exception, ``MemoryError``, a malformed-header error).
-
-    Distinct from ``ProviderError`` (the retryable in-band path that fires the R11 backstop): a
-    ``ProviderError`` is handled by the producer; a ``PoisonItemError`` escapes to the R7 tier-2
-    supervisor, which keys advance-past-poison on the carried **item index** (NOT a clock offset,
-    which drifts every restart) — after K crashes attributed to the same index, the item's slot is
-    skipped (backstopped) so a render-poison item can never infinite-loop (Phase-4 C2 fix)."""
-
-    def __init__(self, item_index: int, cause: BaseException) -> None:
-        super().__init__(f"item {item_index} render poisoned: {type(cause).__name__}: {cause}")
-        self.item_index = item_index
-        self.cause = cause
 
 
 class TaggingError(PirateRadioError):

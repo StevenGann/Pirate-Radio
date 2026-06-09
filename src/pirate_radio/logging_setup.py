@@ -16,6 +16,8 @@ from __future__ import annotations
 import logging
 import sys
 
+from pirate_radio.scrub import SecretScrubFilter
+
 _HANDLER_MARK = "_pirate_radio"  # tags our handler so re-calls replace (not stack) it
 _FORMAT = "%(levelname)s %(name)s: %(message)s"  # journald adds the timestamp + unit
 
@@ -36,6 +38,9 @@ def configure_logging(level: str | int = "INFO") -> None:
         root.removeHandler(handler)  # idempotent: drop our prior handler before re-adding
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(logging.Formatter(_FORMAT))
+    # H22: scrub the journald/stdout stream too, not just the /logs ring — a secret can never reach
+    # the operator log verbatim, even from a bubbled-up third-party exception.
+    handler.addFilter(SecretScrubFilter())
     setattr(handler, _HANDLER_MARK, True)
     root.addHandler(handler)
     root.setLevel(_coerce_level(level))

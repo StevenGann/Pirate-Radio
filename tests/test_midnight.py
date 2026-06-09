@@ -85,6 +85,10 @@ class _FakeStation:
         self.events.append("signaled")  # the day-roll Event is set here — AFTER the file
 
 
+async def _inline_offload(fn, *a, **k):  # noqa: ANN001, ANN002, ANN003 - run prepare on the loop
+    return fn(*a, **k)  # deterministic in tests; prod uses asyncio.to_thread (R23, off the loop)
+
+
 async def _run_one_iteration(task: MidnightTask) -> None:
     t = asyncio.create_task(task.run())
     await asyncio.sleep(0.02)  # let the gated sleep + one regen pass run, then it parks
@@ -96,7 +100,12 @@ async def _run_one_iteration(task: MidnightTask) -> None:
 async def test_sleeps_the_computed_seconds_to_next_midnight() -> None:
     now = datetime(2026, 6, 11, 9, 0, tzinfo=_NY)
     sleeper = _GatedSleeper()
-    task = MidnightTask(stations=[_FakeStation("A")], clock=FixedClock(now), sleeper=sleeper)
+    task = MidnightTask(
+        stations=[_FakeStation("A")],
+        clock=FixedClock(now),
+        sleeper=sleeper,
+        offload=_inline_offload,
+    )
     await _run_one_iteration(task)
     assert sleeper.slept[0] == seconds_until_next_midnight(now, _NY)  # 15 h = 54000 s
 
@@ -107,6 +116,7 @@ async def test_regenerates_then_signals_each_station_file_before_event() -> None
         stations=[a, b],
         clock=FixedClock(datetime(2026, 6, 11, 9, 0, tzinfo=_NY)),
         sleeper=_GatedSleeper(),
+        offload=_inline_offload,
     )
     await _run_one_iteration(task)
     assert a.events == ["prepared", "signaled"]  # Q2: file written THEN event set
@@ -119,6 +129,7 @@ async def test_regen_failure_is_isolated_and_non_fatal(caplog) -> None:
         stations=[good, bad, good2],
         clock=FixedClock(datetime(2026, 6, 11, 9, 0, tzinfo=_NY)),
         sleeper=_GatedSleeper(),
+        offload=_inline_offload,
     )
     with caplog.at_level(logging.CRITICAL):
         await _run_one_iteration(task)  # MUST NOT raise — the bad station never escapes (H-DA-1)
@@ -144,6 +155,7 @@ async def test_midnight_roll_waits_for_an_in_flight_regen_on_the_shared_lock() -
         stations=[station],
         clock=FixedClock(datetime(2026, 6, 11, 9, 0, tzinfo=_NY)),
         sleeper=_GatedSleeper(),
+        offload=_inline_offload,
     )
     roll = asyncio.create_task(task.run())
     await asyncio.sleep(0.02)

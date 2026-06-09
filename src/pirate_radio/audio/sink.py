@@ -116,4 +116,4 @@ class SoundDeviceSink:
                     exc,
                 )
                 return
-            raise  # a real stream error propagates to the supervisor (advance-past-poison)
+            raise  # a real stream error propagates to the supervisor (restart-to-known-good)

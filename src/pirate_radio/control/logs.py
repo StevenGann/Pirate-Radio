@@ -22,7 +22,7 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict
 
-from pirate_radio.supervisor import scrub_secrets
+from pirate_radio.scrub import scrub_secrets
 
 _LEVELS = {"DEBUG": 10, "INFO": 20, "WARNING": 30, "ERROR": 40, "CRITICAL": 50}
 
