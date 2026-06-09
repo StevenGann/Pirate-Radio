@@ -223,7 +223,8 @@ Coordinator (shared services + §A C1 look-ahead budget), two-tier supervision (
 ### Phase 5 — Offline tagging tool — PLAN ADOPTED (building)
 - **Plan Rev 2 ADOPTED** (Rev 1: 2 AYE / 5 NAY → revised; Rev-2 re-vote of the 5 NAYs: 5 AYE → effectively 7 AYE/0 NAY) — `0046`. Standalone `python -m pirate_radio.tagging`: fpcalc fingerprint → AcoustID → MusicBrainz → thresholded fill-not-overwrite selection → atomic tag write. **NO new Python deps** (httpx+mutagen+fpcalc); both web services rate-limited (injected clock, retry re-arms spacing); `_MIN_ACOUSTID_SCORE` floor; key-leak fix (`client=` scrub); Pi nice/ionice + don't-run-while-broadcasting WARN; startup fail-fast. ~5 modules. Carry-forwards: add sync `get_json` to `dj/_http.py`; same-mount temp+fsync+rename.
 - **P5-1 ✅** `tagging/models.py` (frozen `Fingerprint`/`AcoustIdMatch`/`RecordingMetadata`/`TagPlan` with `is_noop`+`changes()`) + `TaggingError` taxonomy in errors.py (`TaggingUnavailable`/`TaggingThrottled`[retry_after]/`TaggingFatal`) — `0047`. Gate: 720 tests, 97.50%, clean.
-- **RESUME POINT: build P5-2** (selection.py PURE choose_best — focused-panel test review) … P5-9 deep-dive.
+- **P5-2 ✅** `tagging/selection.py` PURE `best_match` (highest score, lowest-MBID tie-break, order-independent, floor) + `merge_tags` (fill-not-overwrite, never-erase/blank/churn, force) + `choose_best` (authoritative gate: below-floor→no-op) — `0048`. Focused panel on tests: 2 NAY → revised (choose_best gate; force+fill matrix; per-field never-erase; blank-candidate; determinism). `_MIN_ACOUSTID_SCORE=0.85`. Gate: 745 tests, 97.69%.
+- **RESUME POINT: build P5-3** (clients.py: fpcalc subprocess + RateLimiter) … P5-9 deep-dive.
 ### Phase 6 — Control API (FastAPI, in v1 per D4)  — NOT STARTED
 
 ### Final — deep-dive code-quality + documentation review  — ✅ COMPLETE (all 7 validated)
