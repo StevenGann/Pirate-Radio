@@ -189,7 +189,8 @@ class ControlConfig(BaseModel):
     host: str = "127.0.0.1"  # loopback by default; never 0.0.0.0 without the operator's intent
     port: int = Field(default=8080, ge=1, le=65535)
     token_env: str = "PIRATE_API_TOKEN"
-    log_ring_size: int = Field(default=2000, ge=1)  # the bounded /logs ring (R8′ deviation)
+    # the bounded /logs ring (R8′ deviation); capped so a huge ring can't stall the loop on /logs
+    log_ring_size: int = Field(default=2000, ge=1, le=100_000)
 
 
 class DaemonConfig(BaseModel):

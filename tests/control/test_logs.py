@@ -9,6 +9,7 @@ newest-first). Records are clock-stamped at capture via an INJECTED clock (no wa
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import UTC, datetime
 
 from pirate_radio.control.logs import LogEntry, RingLogHandler, query_logs
@@ -83,3 +84,69 @@ def test_query_newest_first_and_limited() -> None:
     ]
     out = query_logs(entries, limit=2)
     assert [e.message for e in out] == ["m4", "m3"]  # newest first, capped
+
+
+# ---- thread-safety under concurrent emit/snapshot (P6-6 / QA C1) ---------------------------
+class _TrackingLock:
+    """A lock wrapper that counts acquisitions while delegating to a real lock — so a test can
+    assert emit/snapshot actually take the lock (CPython's GIL makes a no-lock deque test pass
+    regardless, so the smoke test below can't discriminate; THIS pins the mechanism)."""
+
+    def __init__(self) -> None:
+        self._real = threading.Lock()
+        self.acquired = 0
+
+    def __enter__(self) -> bool:
+        self.acquired += 1
+        return self._real.__enter__()
+
+    def __exit__(self, *exc: object) -> None:
+        self._real.__exit__(*exc)
+
+
+def test_emit_and_snapshot_acquire_the_lock() -> None:
+    # mutation-sensitive: remove either `with self._lock:` in logs.py and this fails. The lock is
+    # the stated thread-safety mechanism (records appended by logging threads, read by the async
+    # route); it must be genuinely taken — not merely relied on under the GIL (P6-6 / QA C1).
+    h = RingLogHandler(maxsize=10, clock=_Clock())
+    h._lock = _TrackingLock()  # type: ignore[assignment]
+    h.emit(_rec("pirate_radio.x", logging.INFO, "one"))
+    assert h._lock.acquired == 1  # type: ignore[attr-defined]  # emit took the lock
+    h.snapshot()
+    assert h._lock.acquired == 2  # type: ignore[attr-defined]  # snapshot took it too
+
+
+def test_ring_is_thread_safe_under_concurrent_emit_and_snapshot() -> None:
+    # the lock's whole reason for existing: records are appended by logging threads (sink executor,
+    # uvicorn) WHILE the async /logs route reads. Hammer emit from N threads while the main thread
+    # spins snapshot(); assert no torn read / exception and the bound holds (R8' deviation).
+    h = RingLogHandler(maxsize=500, clock=_Clock())
+    writers, per_writer = 8, 200
+    errors: list[BaseException] = []
+    stop = threading.Event()
+
+    def _write(wid: int) -> None:
+        try:
+            for i in range(per_writer):
+                h.emit(_rec("pirate_radio.x", logging.INFO, f"w{wid}-{i}"))
+        except BaseException as exc:  # noqa: BLE001 - record any concurrency failure for the assert
+            errors.append(exc)
+
+    def _read() -> None:
+        while not stop.is_set():
+            snap = h.snapshot()  # must never raise mid-mutation, never exceed the bound
+            assert len(snap) <= 500
+
+    reader = threading.Thread(target=_read)
+    reader.start()
+    threads = [threading.Thread(target=_write, args=(w,)) for w in range(writers)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    stop.set()
+    reader.join()
+
+    assert errors == []  # no exception in any writer
+    final = h.snapshot()
+    assert len(final) == 500  # deque(maxlen) held the bound exactly under contention

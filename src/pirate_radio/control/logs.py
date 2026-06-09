@@ -76,8 +76,11 @@ def query_logs(
     since: datetime | None = None,
     limit: int | None = None,
 ) -> list[LogEntry]:
-    """PURE: filter a snapshot by station substring / minimum level / ``since``, newest-first, then
-    cap at ``limit``. An unknown ``level`` name is treated as no floor (matches all)."""
+    """PURE: filter a snapshot by station / minimum level / ``since``, newest-first, then cap at
+    ``limit``. ``station`` is a **message substring** match, NOT a structured field — records carry
+    no station tag, so ``station="Pi0"`` matches any record whose text contains ``Pi0`` (documented
+    as a convenience in the runbook; ``journalctl | grep`` is the precise tool). An unknown
+    ``level`` name is treated as no floor (matches all)."""
     floor = _LEVELS.get(level.upper(), 0) if level else 0
     out = [
         e

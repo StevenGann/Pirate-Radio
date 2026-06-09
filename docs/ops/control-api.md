@@ -15,6 +15,24 @@ deployment. Confirm at startup:
 journalctl -u pirate-radio | grep -i 'control'    # a serve line iff the API is enabled
 ```
 
+### Detecting a dead control plane (it is crash-isolated — the broadcast hides its death)
+
+The API task is deliberately crash-isolated: if it dies (bad bind, port in use, uvicorn returns),
+the **broadcast keeps running** and the periodic `N/N ON AIR` summary stays green. So the control
+plane can be down while everything *looks* fine. Two ways to know:
+
+```
+# 1. The daemon logs a loud line the instant the API task exits — alert on this string:
+journalctl -u pirate-radio | grep -E 'control-api task (crashed|exited)'
+
+# 2. Actively probe liveness over your tunnel (a cron / systemd-timer one-liner). /health needs no
+#    token; a non-200 (or a refused connection) means the control plane is gone:
+curl -fsS http://127.0.0.1:8080/health >/dev/null || logger -t pirate-radio 'control plane DOWN'
+```
+
+If the bind itself failed at startup there is nothing listening, so `/health` refuses the connection
+— the grep on the startup log (above) is then your only signal. Check it after any config change.
+
 ## Configuration
 
 ```jsonc
@@ -38,13 +56,22 @@ journalctl -u pirate-radio | grep -i 'control'    # a serve line iff the API is 
   # then hit http://127.0.0.1:8080 locally; nothing is exposed on the Pi's LAN interface
   ```
 
+  The SSH-tunnel path needs **no firewall change** — nothing is exposed on the LAN, so do not open a
+  port you don't need.
+
   If you *must* bind the LAN (`host: 0.0.0.0` or a specific LAN IP), that is an explicit operator
-  choice: put a firewall in front of the port and treat the token as the only thing between the LAN
-  and a skip/regenerate action.
+  choice. The full sequence, in order:
+
+  ```
+  sudoedit /etc/pirate-radio/config.json     # 1. set control.host (LAN IP/0.0.0.0) + control.port
+  sudo ufw allow from 192.168.1.0/24 to any port 8080 proto tcp   # 2. firewall: scope to your LAN
+  sudo systemctl restart pirate-radio        # 3. re-read config + re-bind
+  ```
+
+  Treat the token as the only thing between the LAN and a skip/regenerate action.
 
 - **`port` is the daemon's own listener** — it is NOT the systemd unit. No unit edit is needed to
-  change it; edit `config.json` and `systemctl restart pirate-radio`. If you firewall the host, open
-  this port for the tunnel/LAN path you chose.
+  change it; edit `config.json` and `systemctl restart pirate-radio`.
 
 ## The token (H22 — by name, never by value)
 
@@ -116,6 +143,13 @@ bearer token (401 without it). Unknown station → 404; unknown/absent schedule 
 sink writes the whole buffer on its own thread; a mid-segment cut is not possible without surgery).
 Expect the change at the next segment boundary, not instantly. 202 = accepted, not "already skipped".
 
+Two quirks worth knowing: skip is a single flag, not a counter — pressing it several times in quick
+succession still drops only **one** item (the next). During a degraded/backstop stretch (an LLM/TTS
+underrun filling with the bumper) the flag applies to the next **real** item whenever it arrives,
+which may be a while. A skip is also scoped to the current day — one pressed in the final seconds
+before midnight does **not** carry over to eat the new day's opening station-ID; it is cleared at the
+day-roll.
+
 ### Regenerate is lock-serialized and effective at the next roll
 
 `POST .../regenerate` rebuilds the on-disk schedule under the station's regen lock — the **same lock
@@ -131,8 +165,12 @@ triggered over HTTP against the live daemon.)
 
 - **Lossy across restarts:** the ring is empty after every daemon restart — it holds only what the
   *current* process has logged since it started.
-- **Shallow:** only the last `log_ring_size` records survive; older ones are overwritten.
+- **Shallow:** only the last `log_ring_size` records survive; older ones are overwritten. The ring
+  captures **INFO and above** (DEBUG is dropped to keep the per-record cost off the timing path).
 - Secrets are scrubbed on the way in (Bearer/`sk-`/api-key/Basic/URL-userinfo/etc.), same as journald.
+- **`?station=` is a message substring match**, not a structured field — `?station=Pi0` matches any
+  record whose text contains `Pi0` (and `?station=Pi` matches `Pi0`/`Pi1`). For precise filtering use
+  `journalctl | grep`. The param is a convenience, not a guarantee.
 
 **journald remains the source of truth** for anything historical or forensic:
 
@@ -143,3 +181,20 @@ journalctl -u pirate-radio | grep -E 'backstop fired|render-poison'
 
 Use `/logs` for a quick "what is this running process doing right now" over the tunnel; use
 `journalctl` for "what happened last night / across the restart".
+
+## Troubleshooting
+
+- **Every call returns 401, but the token file looks right.** The daemon reads `PIRATE_API_TOKEN`
+  **once at startup**. If you edited `secrets.env` (e.g. rotated the token) without restarting, the
+  daemon is still running the *previous* token. Fix: `sudo systemctl restart pirate-radio`. (Auth
+  failures are not in the access log — `access_log=False` — so a silent 401 wall is almost always
+  this.)
+- **Startup fails with "control API token env var … is not set or empty".** You set
+  `control.enabled: true` but the `token_env` variable isn't in the `EnvironmentFile`. Add it (see
+  *The token*, above) and restart. The daemon refuses to serve an unauthenticated control plane.
+- **`curl` connection refused / hangs.** The control plane isn't listening: either it's disabled
+  (no `control` block / `enabled:false`), the bind failed at startup (port in use — see *Detecting a
+  dead control plane*), or your SSH tunnel dropped. Check `journalctl -u pirate-radio | grep -i
+  control`.
+- **`/logs` is empty or missing old lines.** Expected — it's an in-memory ring, lost on restart and
+  capped at `log_ring_size`. Use `journalctl` for history.

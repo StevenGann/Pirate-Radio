@@ -72,6 +72,36 @@ async def test_skip_drops_the_next_segment_then_clears() -> None:
     assert not skip.is_set()  # one-shot: cleared after the single drop
 
 
+async def test_skip_during_airing_does_not_cut_the_current_segment() -> None:
+    # The deferral-justifying half of the contract (P6-6 / QA H1): a skip signalled WHILE an item
+    # is airing never cuts it — the airing item finishes and the NEXT one is dropped. Modelled by a
+    # sink that sets the skip Event the moment it starts playing s0 (operator presses skip mid-s0).
+    buf = LookAheadBuffer(maxsize=4)
+    s0, s1, s2 = _seg(10.0), _seg(20.0), _seg(30.0)
+    for s in (s0, s1, s2):
+        await buf.put(s)
+    skip = asyncio.Event()
+
+    class _SkipMidAirSink(FakeAudioSink):
+        async def play(self, b: AudioBuffer) -> None:
+            await super().play(b)
+            if len(self.played) == 1:  # s0 is now airing -> operator presses skip
+                skip.set()
+
+    sink = _SkipMidAirSink()
+    player = Player(
+        buffer=buf,
+        sink=sink,
+        sleeper=VirtualSleeper(),
+        backstop=_BACKSTOP,
+        refill_budget_seconds=5.0,
+        skip=skip,
+    )
+    await player.run(count=3)
+    assert sink.played == [s0.audio, s2.audio]  # s0 (airing) finished; s1 (the next) dropped
+    assert not skip.is_set()  # one-shot cleared
+
+
 async def test_plays_segments_in_order_gaplessly() -> None:
     buf = LookAheadBuffer(maxsize=4)
     s0, s1 = _seg(10.0), _seg(20.0)

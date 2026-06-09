@@ -85,6 +85,11 @@ sudo install -m 0644 config.example.json /etc/pirate-radio/config.json
 sudoedit /etc/pirate-radio/config.json     # set stations, audio_device names, grids, LLM/TTS, state_dir
 ```
 
+**`state_dir` MUST equal the unit's `StateDirectory` mount** (`/var/lib/pirate-radio`, created `0700`
+by systemd on start). If they differ, schedules write outside the unit-managed dir — wrong owner/mode
+and, if that path is on the boot SD, defeating the off-SD goal (A6). To enable the optional control
+API, add a `control` block here too — see `docs/ops/control-api.md` (off by default).
+
 Dry-run the schedule generation before going live (oneshot, does not start the daemon):
 
 ```

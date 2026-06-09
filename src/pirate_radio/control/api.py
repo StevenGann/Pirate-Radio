@@ -15,7 +15,7 @@ import logging
 import os
 import secrets
 from collections.abc import Awaitable, Callable
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Annotated, Any
 
 from fastapi import FastAPI, Header, Query
@@ -49,12 +49,26 @@ def create_app(
 
     def _require_token(authorization: Annotated[str | None, Header()] = None) -> None:
         expected = f"Bearer {token}"
-        if authorization is None or not secrets.compare_digest(authorization, expected):
+        # compare_digest raises TypeError on a non-ASCII header (Starlette decodes header bytes as
+        # latin-1, so a junk byte survives). Treat any such malformed header as unauthorized — fail
+        # CLOSED, never a 500 (P6-6 / Fact-Checker F1).
+        try:
+            valid = authorization is not None and secrets.compare_digest(authorization, expected)
+        except TypeError:
+            valid = False
+        if not valid:
             raise _Unauthorized
 
     @app.exception_handler(_Unauthorized)
     async def _on_auth(_req: Request, _exc: _Unauthorized) -> JSONResponse:
         return _envelope(401, fail("unauthorized", "missing or invalid bearer token"))
+
+    @app.exception_handler(Exception)
+    async def _on_unhandled(_req: Request, exc: Exception) -> JSONResponse:
+        # The envelope invariant is TOTAL: any unexpected error becomes a 500 envelope, never
+        # Starlette's bare-text default (P6-6 / DA). The detail is generic — no internals leak.
+        logger.error("unhandled control-API error: %s: %s", type(exc).__name__, exc)
+        return _envelope(500, fail("internal", "internal server error"))
 
     @app.exception_handler(StationNotFound)
     async def _on_station(_req: Request, exc: StationNotFound) -> JSONResponse:
@@ -108,9 +122,14 @@ def create_app(
         station: str | None = None,
         level: str | None = None,
         since: datetime | None = None,
-        limit: int | None = None,
+        limit: Annotated[int | None, Query(ge=1, le=10000)] = None,
     ) -> ApiResponse:
         _require_token(authorization)
+        if since is not None and since.tzinfo is None:
+            # Stored stamps are tz-aware (UTC); a naive `?since=2026-06-08T12:00:00` (the obvious
+            # way an operator types it) would raise comparing naive-vs-aware. Treat naive as UTC
+            # instead of 500-ing (P6-6 / DA).
+            since = since.replace(tzinfo=UTC)
         entries = query_logs(
             log_ring.snapshot(), station=station, level=level, since=since, limit=limit
         )

@@ -104,6 +104,24 @@ async def test_isolated_swallows_a_task_crash() -> None:
     await _isolated(_boom(), name="control-api")  # MUST NOT raise (broadcast must survive)
 
 
+async def test_isolated_logs_loudly_on_a_clean_exit(caplog) -> None:
+    # P6-6 / Field-Op C1: a control plane that exits cleanly (uvicorn returns) must leave a
+    # greppable trace, else the operator only learns it's gone when a call refuses.
+    import logging
+
+    from pirate_radio.__main__ import _isolated
+
+    async def _quietly_returns() -> None:
+        return None
+
+    with caplog.at_level(logging.WARNING):
+        await _isolated(_quietly_returns(), name="control-api")
+    assert any(
+        "control-api" in r.message and "control plane is now down" in r.message
+        for r in caplog.records
+    )
+
+
 async def test_run_daemon_api_crash_does_not_stop_the_broadcast() -> None:
     import asyncio
 

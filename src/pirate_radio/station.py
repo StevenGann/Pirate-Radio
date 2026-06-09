@@ -163,6 +163,10 @@ class Station:
                 )
                 self._status(StationState.ON_AIR)
                 logger.info("station %s on air (schedule %s)", self.name, day.isoformat())
+                # A skip is "drop the NEXT item *in this slice*". Clear any flag carried over the
+                # day-roll boundary so a skip pressed near end-of-day can't leak across midnight and
+                # silently eat the new day's opening station-ID (P6-6 / DA).
+                self._skip.clear()
                 await play_day(
                     anchored=anchored,
                     now=self._clock.now(),

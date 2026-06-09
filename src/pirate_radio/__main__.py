@@ -91,13 +91,18 @@ async def _run_daemon(
 
 
 async def _isolated(coro: Coroutine[Any, Any, None], *, name: str) -> None:
-    """Await ``coro``; swallow+log any non-cancellation failure so it can't cancel a sibling."""
+    """Await ``coro``; swallow+log any non-cancellation failure so it can't cancel a sibling. The
+    control plane is meant to run forever, so even a CLEAN exit is logged loudly — otherwise a
+    vanished control plane (e.g. uvicorn returning) leaves no trace and the operator only finds out
+    when a call refuses (P6-6 / Field-Op C1). Either way the broadcast keeps running (H-A5)."""
     try:
         await coro
     except asyncio.CancelledError:
         raise
     except Exception as exc:  # noqa: BLE001 - the broadcast must outlive an API crash (H-A5)
         logger.error("%s task crashed (broadcast continues): %s", name, exc)
+    else:
+        logger.warning("%s task exited (broadcast continues; control plane is now down)", name)
 
 
 def _prod_deps() -> MainDeps:  # pragma: no cover - the hardware/asyncio-run wiring (R20/R21)
@@ -142,6 +147,10 @@ def _prod_deps() -> MainDeps:  # pragma: no cover - the hardware/asyncio-run wir
         from pirate_radio.control.server import serve
 
         ring = RingLogHandler(maxsize=control.log_ring_size)
+        # INFO floor: emit() runs scrub_secrets + a pydantic validation per record in the CALLER's
+        # thread (incl. the sink-write executor). DEBUG is the high-frequency tier and /logs rarely
+        # needs it — keep that cost off the timing-sensitive path on a small Pi (P6-6 / RPi).
+        ring.setLevel(logging.INFO)
         logging.getLogger().addHandler(ring)  # capture records for GET /logs (the R8′ ring)
         app = create_app(
             service=coordinator.build_control_service(),

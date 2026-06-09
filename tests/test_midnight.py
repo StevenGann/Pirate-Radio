@@ -129,3 +129,29 @@ async def test_regen_failure_is_isolated_and_non_fatal(caplog) -> None:
     ]  # the LATER sibling also rolled (loop continued)
     assert bad.events == []  # never signaled (raised before the event) -> keeps today's schedule
     assert any("Bad" in r.message and r.levelno == logging.CRITICAL for r in caplog.records)
+
+
+async def test_midnight_roll_waits_for_an_in_flight_regen_on_the_shared_lock() -> None:
+    # P6-6 / QA H2: the regen-lock-vs-midnight race composed against the REAL MidnightTask. An API
+    # regen holds the station's regen_lock across its offloaded write; the midnight roll for that
+    # station must BLOCK on the same lock and not write/signal until the regen releases it — proving
+    # the two writers never interleave on one schedule file. (The other direction — a regen waiting
+    # on a midnight-held lock — is pinned in tests/test_coordinator.py.)
+    station = _FakeStation("A")
+    await station.regen_lock.acquire()  # an in-flight API regen is holding the lock
+
+    task = MidnightTask(
+        stations=[station],
+        clock=FixedClock(datetime(2026, 6, 11, 9, 0, tzinfo=_NY)),
+        sleeper=_GatedSleeper(),
+    )
+    roll = asyncio.create_task(task.run())
+    await asyncio.sleep(0.02)
+    assert station.events == []  # BLOCKED: the roll can't prepare/signal while the regen holds it
+
+    station.regen_lock.release()  # the regen finished -> the roll proceeds, serialized
+    await asyncio.sleep(0.02)
+    assert station.events == ["prepared", "signaled"]  # rolled only after the lock was free
+    roll.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await roll

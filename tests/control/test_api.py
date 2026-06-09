@@ -78,7 +78,10 @@ def _client(monkeypatch, **over) -> tuple[TestClient, dict]:
     )
     ring = RingLogHandler(maxsize=50, clock=lambda: _NOW)
     app = create_app(service=service, log_ring=ring, token_env="PIRATE_API_TOKEN", offload=_offload)
-    return TestClient(app), rec
+    # raise_server_exceptions=False so the TestClient returns the catch-all 500 envelope instead of
+    # re-raising (the prod ServerErrorMiddleware uses the registered handler either way).
+    raise_server = over.pop("raise_server_exceptions", True)
+    return TestClient(app, raise_server_exceptions=raise_server), rec
 
 
 # ---- fail-fast on missing token ------------------------------------------------------------
@@ -185,3 +188,73 @@ def test_logs_filters_from_the_ring(monkeypatch) -> None:
     body = client.get("/logs?level=WARNING", headers=_AUTH).json()
     assert body["success"] is True
     assert [e["message"] for e in body["data"]] == ["station Pi0 backstop fired"]
+
+
+# ---- auth edge cases (P6-6 / QA H3) -------------------------------------------------------
+@pytest.mark.parametrize(
+    "header",
+    [
+        _TOKEN,  # no "Bearer " scheme prefix
+        f"bearer {_TOKEN}",  # wrong-case scheme
+        f"Bearer {_TOKEN} ",  # trailing space
+        "Bearer ",  # empty token
+        f"Token {_TOKEN}",  # wrong scheme word
+    ],
+)
+def test_malformed_auth_scheme_is_401_not_200(monkeypatch, header) -> None:
+    client, _ = _client(monkeypatch)
+    r = client.get("/stations", headers={"Authorization": header})
+    assert r.status_code == 401  # only the exact "Bearer <token>" string authenticates
+
+
+def test_non_ascii_auth_header_fails_closed_401_not_500(monkeypatch) -> None:
+    # a non-ASCII Authorization byte makes secrets.compare_digest raise TypeError; it must be
+    # caught and treated as unauthorized (fail CLOSED), never escape as a 500 (Fact-Checker F1).
+    client, _ = _client(monkeypatch)
+    # sent as raw bytes (httpx refuses to ASCII-encode a non-ASCII str header); Starlette decodes
+    # header bytes as latin-1, so a junk byte reaches compare_digest and raises TypeError.
+    r = client.get("/stations", headers={"Authorization": b"Bearer \xe9"})
+    assert r.status_code == 401
+    assert r.json()["error"]["code"] == "unauthorized"
+
+
+# ---- envelope invariant is total (P6-6 / DA) ----------------------------------------------
+def test_naive_since_is_coerced_not_500(monkeypatch) -> None:
+    # the obvious operator query `?since=<no-offset>` must not 500 on the naive-vs-aware comparison.
+    # The ring MUST be non-empty or the filter short-circuits and never reaches the comparison this
+    # test exists to exercise (P6-6 / QA: empty-ring would be coverage theatre). Stamps are tz-aware
+    # UTC; a stored entry strictly after the naive `since` proves the coerced comparison ran.
+    import logging
+
+    monkeypatch.setenv("PIRATE_API_TOKEN", _TOKEN)
+    service = ControlService(
+        registry={}, configs={}, clock=FixedClock(_NOW), load_schedule=lambda n, d: None
+    )
+    stamp = datetime(2026, 6, 10, 12, 0, 0, tzinfo=ZoneInfo("UTC"))
+    ring = RingLogHandler(maxsize=50, clock=lambda: stamp)
+    ring.emit(logging.LogRecord("x", logging.INFO, __file__, 1, "station Pi0 on air", None, None))
+    app = create_app(service=service, log_ring=ring, token_env="PIRATE_API_TOKEN")
+    client = TestClient(app, raise_server_exceptions=False)
+
+    r = client.get("/logs?since=2026-06-10T00:00:00", headers=_AUTH)  # naive -> coerced to UTC
+    assert r.status_code == 200 and r.json()["success"] is True
+    assert [e["message"] for e in r.json()["data"]] == ["station Pi0 on air"]  # comparison ran
+
+
+def test_logs_limit_must_be_positive_422(monkeypatch) -> None:
+    client, _ = _client(monkeypatch)
+    assert client.get("/logs?limit=0", headers=_AUTH).status_code == 422
+    assert client.get("/logs?limit=-3", headers=_AUTH).status_code == 422
+
+
+def test_unhandled_error_becomes_a_500_envelope(monkeypatch) -> None:
+    # any unexpected error in a handler is enveloped as a 500 {success:false}, never bare text.
+    def _boom(name, day):  # noqa: ANN001
+        raise RuntimeError("kaboom")
+
+    client, _ = _client(monkeypatch, load_schedule=_boom, raise_server_exceptions=False)
+    r = client.get("/stations/Pi0/schedule", headers=_AUTH)
+    assert r.status_code == 500
+    body = r.json()
+    assert body["success"] is False and body["error"]["code"] == "internal"
+    assert "kaboom" not in r.text  # internals never leak to the caller

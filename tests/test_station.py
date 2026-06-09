@@ -122,6 +122,38 @@ def test_signal_day_roll_sets_the_event(tmp_path) -> None:
     assert ev.is_set()  # the run loop, parked on day_roll.wait(), will wake and re-slice
 
 
+def test_signal_skip_sets_the_skip_event(tmp_path) -> None:
+    st = _station(tmp_path)
+    assert not st._skip.is_set()
+    st.signal_skip()
+    assert st._skip.is_set()  # the player drops the next item at the boundary
+
+
+async def test_run_clears_a_stale_skip_at_each_slice_start(tmp_path, monkeypatch) -> None:
+    # P6-6 / DA: a skip set near end-of-day (after the player's last boundary check) must NOT leak
+    # across the day-roll and eat the new day's opening item. The slice start clears it, so play_day
+    # always begins with a clean flag.
+    skip_states: list[bool] = []
+    played = asyncio.Event()
+
+    async def _fake_play_day(**kw):
+        skip_states.append(kw["skip"].is_set())  # what the slice sees at its start
+        played.set()
+
+    monkeypatch.setattr("pirate_radio.station.play_day", _fake_play_day)
+    monkeypatch.setattr("pirate_radio.station.load_with_recovery", lambda *a, **k: _schedule())
+
+    st = _station(tmp_path)
+    st.signal_skip()  # a stale skip carried into the slice
+    assert st._skip.is_set()
+    task = asyncio.create_task(st.run())
+    await asyncio.wait_for(played.wait(), 2.0)
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+    assert skip_states[0] is False  # the slice started with the stale skip cleared, not set
+
+
 async def test_run_plays_the_day_then_awaits_dayroll(tmp_path, monkeypatch) -> None:
     played = asyncio.Event()
     calls: list = []
