@@ -37,6 +37,7 @@ dev = [
     "types-PyYAML",
     "pytest-asyncio>=0.23",
     "pytest-socket>=0.7",  # Phase 6: enforce "no socket bind on CI" for the control-API tests (R21)
+    "pytest-timeout>=2.3",  # a run-loop regression must FAIL loudly, never hang CI (code-cycle QA)
 ]
 
 [tool.setuptools.packages.find]
@@ -66,6 +67,9 @@ addopts = [
     # ASGI TestClient working; the @pytest.mark.network smokes re-enable real sockets explicitly.
     "--disable-socket",
     "--allow-unix-socket",
+    # a deadlock/infinite-loop regression (e.g. a stale day-roll re-slice spin) must FAIL with a
+    # traceback, not hang the whole job — per-test wall-clock ceiling (code-cycle QA HIGH).
+    "--timeout=60",
 ]
 markers = [
     "hardware: tests that require real Raspberry Pi hardware (skipped in CI)",

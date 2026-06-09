@@ -77,11 +77,14 @@ def _track_tags(item: ScheduleItem) -> tuple[str | None, str | None]:
 def _now_view(station: str, np: NowPlaying) -> NowPlayingView:
     next_kind = np.next_item.kind if np.next_item is not None else None
     if np.item is None:  # gap (next set) or past end-of-day (next None) — not airing
+        # During a transition gap the NEXT item's block is known — surface it so an operator polling
+        # /now sees which block is resuming (None only past end-of-day, when next_item is None too).
+        next_block = np.next_item.block_name if np.next_item is not None else None
         return NowPlayingView(
             station=station,
             playing=False,
             item_kind=None,
-            block=None,
+            block=next_block,
             offset_seconds=0.0,
             title=None,
             artist=None,

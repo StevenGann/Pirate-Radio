@@ -108,11 +108,15 @@ def test_now_playing_in_a_gap_reports_next_and_threads_transition_silence() -> N
     np = _service(clock_at=datetime(2026, 6, 10, 0, 10, 1, tzinfo=_TZ)).now_playing("Pi0")
     assert np.playing is False and np.item_kind is None
     assert np.next_item_kind == "station_id" and np.gap_seconds == pytest.approx(1.0)
+    # the resuming block is surfaced during the gap (from the next item's block_name) so an operator
+    # polling /now mid-transition sees which block is about to resume (cycle-3 remediation).
+    assert np.block == "Morning"
 
 
 def test_now_playing_past_end_of_day_has_no_next() -> None:
     np = _service(clock_at=datetime(2026, 6, 10, 0, 30, tzinfo=_TZ)).now_playing("Pi0")
     assert np.playing is False and np.next_item_kind is None and np.gap_seconds == 0.0
+    assert np.block is None  # past end-of-day there is no next item, so no resuming block
 
 
 def test_now_playing_unknown_station_raises() -> None:

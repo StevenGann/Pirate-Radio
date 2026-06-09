@@ -35,6 +35,16 @@ from pirate_radio.errors import ProviderError, ProviderFatal, ProviderUnavailabl
 logger = logging.getLogger(__name__)
 
 _ESPEAK_BASE_WPM = 175  # espeak's ~default speaking rate; scaled by cfg.speed
+_S16_FULL_SCALE = 32768.0  # s16 → float32 divisor (NOT 32767) — pinned by the 1e-7 golden test
+
+
+def _s16le_to_buffer(raw: bytes, *, sample_rate: int, channels: int) -> AudioBuffer:
+    """PURE: little-endian s16 PCM bytes -> ``AudioBuffer`` (the shared decode for the WAV path and
+    the ElevenLabs raw-PCM path). Callers do their own framing/guards first; this is only the
+    frombuffer → /32768 → reshape(-1, channels) core (cycle-3 consolidation)."""
+    ints = np.frombuffer(raw, dtype="<i2").astype(np.float32) / np.float32(_S16_FULL_SCALE)
+    samples = np.ascontiguousarray(ints.reshape(-1, channels), dtype=np.float32)
+    return AudioBuffer(samples, sample_rate, channels)
 
 
 def wav_bytes_to_buffer(raw: bytes) -> AudioBuffer:
@@ -57,9 +67,7 @@ def wav_bytes_to_buffer(raw: bytes) -> AudioBuffer:
         raise ProviderFatal(f"tts: unexpected WAV sample width {width} bytes (expected 2)")
     if ch < 1:  # pragma: no cover - defensive; the wave module never yields < 1 channel
         raise ProviderFatal(f"tts: WAV channels must be >= 1, got {ch}")
-    ints = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / np.float32(32768.0)
-    samples = np.ascontiguousarray(ints.reshape(-1, ch), dtype=np.float32)
-    return AudioBuffer(samples, rate, ch)
+    return _s16le_to_buffer(pcm, sample_rate=rate, channels=ch)
 
 
 def build_piper_argv(binary: str, model: Path, out_path: str, *, speed: float) -> list[str]:
@@ -228,9 +236,7 @@ def pcm_s16le_to_buffer(raw: bytes, *, sample_rate: int, channels: int = 1) -> A
         raise ProviderFatal(
             f"elevenlabs: PCM length {len(raw)} not divisible by frame size {bytes_per_frame}"
         )
-    ints = np.frombuffer(raw, dtype="<i2").astype(np.float32) / np.float32(32768.0)
-    samples = np.ascontiguousarray(ints.reshape(-1, channels), dtype=np.float32)
-    return AudioBuffer(samples, sample_rate, channels)
+    return _s16le_to_buffer(raw, sample_rate=sample_rate, channels=channels)
 
 
 class ElevenLabsTTS:
@@ -271,13 +277,13 @@ class ElevenLabsTTS:
         headers = {"xi-api-key": self._api_key, "accept": "audio/pcm"}
         params = {"output_format": f"pcm_{self._REQUEST_RATE}"}
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:  # pragma: no cover
-                resp = await client.post(  # pragma: no cover
+            async with httpx.AsyncClient(timeout=self._timeout) as client:  # pragma: no cover (net)
+                resp = await client.post(  # pragma: no cover (network)
                     url, headers=headers, params=params, json=body
                 )
-                if resp.status_code >= 400:  # pragma: no cover
+                if resp.status_code >= 400:  # tested via the fake-httpx seam (no real socket)
                     raise map_http_status("elevenlabs", resp.status_code, resp.text)
-                return resp.content  # pragma: no cover
+                return resp.content
         except ProviderError:
             raise
         except Exception as exc:  # noqa: BLE001 — re-typed by the pure mapper

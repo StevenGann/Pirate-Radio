@@ -10,16 +10,15 @@ to the FROZEN ``run_once`` (Q1: trim here, don't churn ``run_once``).
 from __future__ import annotations
 
 import asyncio
-import bisect
 from datetime import datetime
-from typing import cast
 
 import numpy as np
 
 from pirate_radio.audio.buffer import DEFAULT_SAMPLE_RATE, AudioBuffer
 from pirate_radio.audio.decode import Decoder
 from pirate_radio.audio.loudness import normalize_to
-from pirate_radio.dj.protocols import AudioSink
+from pirate_radio.dj.protocols import AudioSink, TextGenerator, TTSEngine
+from pirate_radio.pipeline.timing import Sleeper
 from pirate_radio.schedule.models import ScheduleItem, TrackItem
 from pirate_radio.schedule.resume import AnchoredSchedule
 
@@ -27,31 +26,39 @@ from pirate_radio.schedule.resume import AnchoredSchedule
 def slice_from_now(
     anchored: AnchoredSchedule, now: datetime
 ) -> tuple[list[ScheduleItem], float, float]:
-    """PURE: ``(remaining items, seek offset into the first, leading gap seconds)``. Mirrors
-    ``find_now``'s bisect but returns the index-derived slice (not item identity). Cases: airing
-    (offset>0, gap=0), in a gap / before first (gap>0, offset=0), past end-of-day (empty)."""
-    starts, ends, items = anchored.starts, anchored.ends, anchored.items
-    idx = bisect.bisect_right(starts, now) - 1
-    if idx >= 0 and now < ends[idx]:  # airing now -> seek into items[idx]
-        return list(items[idx:]), (now - starts[idx]).total_seconds(), 0.0
-    nxt = bisect.bisect_right(starts, now)  # first item starting after now
-    if nxt < len(items):  # in a gap / before the first item (R11 leading silence)
-        return list(items[nxt:]), 0.0, (starts[nxt] - now).total_seconds()
-    return [], 0.0, 0.0  # past end-of-day -> caller regenerates
+    """PURE: ``(remaining items, seek offset into the first, leading gap seconds)`` for ``now`` to
+    end-of-day. Delegates to ``AnchoredSchedule.slice_from`` so the airing/gap/past-end bisect lives
+    in ONE place (shared with ``find_now``) and the two views can never diverge (code-cycle)."""
+    return anchored.slice_from(now)
 
 
-async def play_day(*, anchored: AnchoredSchedule, now: datetime, **run_once_kwargs: object) -> None:
-    """Play the slice for ``now`` to end-of-day: R11 leading gap, then the (possibly seek-trimmed)
-    remaining items via ``run_once``. ``run_once_kwargs`` are the full ``run_once`` keyword args
-    EXCEPT ``items`` (which this computes): ``sink``, ``decoder``, ``tts``, ``backstop``,
-    ``sleeper``, ``refill_budget_seconds``, ``sample_rate``/``channels``, the DJ args, etc."""
+async def play_day(
+    *,
+    anchored: AnchoredSchedule,
+    now: datetime,
+    tts: TTSEngine,
+    decoder: Decoder,
+    sink: AudioSink,
+    backstop: AudioBuffer,
+    sleeper: Sleeper,
+    refill_budget_seconds: float,
+    text_generator: TextGenerator | None = None,
+    persona: str | None = None,
+    station_name: str | None = None,
+    station_tagline: str | None = None,
+    loudness_target_lufs: float = -16.0,
+    sample_rate: int = DEFAULT_SAMPLE_RATE,
+    channels: int = 1,
+    transition_silence: float = 0.0,
+    maxsize: int = 2,
+    skip: asyncio.Event | None = None,
+) -> None:
+    """Play the slice for ``now`` to end-of-day: the R11 leading gap, then the (possibly
+    seek-trimmed) remaining items via the FROZEN ``run_once``. Takes ``run_once``'s keyword surface
+    explicitly (minus ``items``, which this computes) and forwards it by name — so the R11 gap
+    silence is built at the SAME ``sample_rate``/``channels`` ``run_once`` receives (no desync, no
+    untyped ``**kwargs`` / casts — code-cycle)."""
     from pirate_radio.pipeline import run_once  # local: avoid any package import-order surprise
-
-    sink = cast(AudioSink, run_once_kwargs["sink"])
-    decoder = cast(Decoder, run_once_kwargs["decoder"])
-    sample_rate = cast(int, run_once_kwargs.get("sample_rate", DEFAULT_SAMPLE_RATE))
-    channels = cast(int, run_once_kwargs.get("channels", 1))
-    loudness = cast(float, run_once_kwargs.get("loudness_target_lufs", -16.0))
 
     items, offset, gap = slice_from_now(anchored, now)
     if gap > 0:
@@ -63,18 +70,44 @@ async def play_day(*, anchored: AnchoredSchedule, now: datetime, **run_once_kwar
         return
 
     first = items[0]
-    if offset > 0 and isinstance(first, TrackItem):
-        buf = await decoder.decode(first.track)
-        offset_frames = round(offset * buf.sample_rate)
-        if offset_frames < buf.frames:  # seek into the partial first track
-            trimmed = AudioBuffer(
-                np.ascontiguousarray(buf.samples[offset_frames:]), buf.sample_rate, buf.channels
-            )
-            normalized = await asyncio.to_thread(
-                normalize_to, trimmed, target_lufs=loudness, track_label=str(first.track.path)
-            )
-            await sink.play(normalized)
-        # else (offset >= decoded frames: VBR/truncated/metadata-lying) -> skip, never an empty buf
+    if offset > 0:
+        # The first item is partially aired (a resume landed inside it). For a track, air the
+        # seek-trimmed remainder; for patter, drop it — re-airing a half-spoken intro/id from
+        # second 0 is worse than skipping it (code-cycle). Either way the partial item is consumed
+        # here, not replayed by run_once.
+        if isinstance(first, TrackItem):
+            buf = await decoder.decode(first.track)
+            offset_frames = round(offset * buf.sample_rate)
+            if offset_frames < buf.frames:  # seek into the partial first track
+                trimmed = AudioBuffer(
+                    np.ascontiguousarray(buf.samples[offset_frames:]), buf.sample_rate, buf.channels
+                )
+                normalized = await asyncio.to_thread(
+                    normalize_to,
+                    trimmed,
+                    target_lufs=loudness_target_lufs,
+                    track_label=str(first.track.path),
+                )
+                await sink.play(normalized)
+            # else (offset >= decoded frames: VBR/truncated/metadata-lying) -> skip, never empty buf
         items = items[1:]
 
-    await run_once(items=items, **run_once_kwargs)  # type: ignore[arg-type]
+    await run_once(
+        items=items,
+        tts=tts,
+        decoder=decoder,
+        sink=sink,
+        backstop=backstop,
+        sleeper=sleeper,
+        refill_budget_seconds=refill_budget_seconds,
+        text_generator=text_generator,
+        persona=persona,
+        station_name=station_name,
+        station_tagline=station_tagline,
+        loudness_target_lufs=loudness_target_lufs,
+        sample_rate=sample_rate,
+        channels=channels,
+        transition_silence=transition_silence,
+        maxsize=maxsize,
+        skip=skip,
+    )

@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from pirate_radio.durability import atomic_replace, fsync_dir
+from pirate_radio.durability import atomic_replace, fsync_dir, write_bytes_durably
 
 
 def _write(p: Path, text: str) -> None:
@@ -81,3 +81,46 @@ def test_best_effort_unopenable_dir_is_swallowed(tmp_path: Path, monkeypatch) ->
     fsync_dir(tmp_path, strict=False)  # MUST NOT raise
     with pytest.raises(OSError):
         fsync_dir(tmp_path, strict=True)  # strict surfaces it
+
+
+# ---- write_bytes_durably: the shared temp→fsync→atomic-replace byte writer (CF cycle-3) -----
+def test_write_bytes_durably_writes_atomically_and_fsyncs(tmp_path: Path, monkeypatch) -> None:
+    real_fsync = os.fsync
+    file_fsyncs = dir_fsyncs = 0
+
+    def spy(fd: int) -> None:
+        nonlocal file_fsyncs, dir_fsyncs
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            dir_fsyncs += 1
+        else:
+            file_fsyncs += 1
+        real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", spy)
+    dst = tmp_path / "state.json"
+    write_bytes_durably(dst, b"durable-payload", strict=True)
+    assert dst.read_bytes() == b"durable-payload"
+    assert file_fsyncs >= 1  # the file bytes were fsynced before the rename
+    assert dir_fsyncs >= 1  # the parent dir was fsynced so the rename survives power loss
+    # no stray temp left behind in the directory
+    assert [p.name for p in tmp_path.iterdir()] == ["state.json"]
+
+
+def test_write_bytes_durably_overwrites_existing(tmp_path: Path) -> None:
+    dst = tmp_path / "f"
+    dst.write_bytes(b"old")
+    write_bytes_durably(dst, b"new", strict=True)
+    assert dst.read_bytes() == b"new"
+
+
+def test_write_bytes_durably_leaves_no_temp_on_failure(tmp_path: Path, monkeypatch) -> None:
+    dst = tmp_path / "f"
+
+    def boom(*_a: object, **_k: object) -> None:
+        raise OSError("write failed")
+
+    # fail during the in-fdopen write; the temp must be unlinked and the error re-raised
+    monkeypatch.setattr(os, "fsync", boom)
+    with pytest.raises(OSError):
+        write_bytes_durably(dst, b"data", strict=True)
+    assert list(tmp_path.iterdir()) == []  # no stray .tmp

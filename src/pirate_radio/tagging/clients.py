@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -23,6 +22,7 @@ from pirate_radio.errors import (
     TaggingUnavailable,
 )
 from pirate_radio.tagging.models import AcoustIdMatch, Fingerprint, RecordingMetadata
+from pirate_radio.yeartag import parse_year
 
 _FPCALC_LENGTH_SECONDS = 120  # fingerprint only the first 120 s — bounds per-file CPU (RPi)
 _ACOUSTID_URL = "https://api.acoustid.org/v2/lookup"
@@ -30,7 +30,6 @@ _ACOUSTID_INTERVAL_SECONDS = 0.34  # AcoustID ≈3 req/s per key
 _MUSICBRAINZ_URL = "https://musicbrainz.org/ws/2"
 _MUSICBRAINZ_INTERVAL_SECONDS = 1.0  # MusicBrainz policy: ≤1 req/s per IP
 _DEFAULT_MAX_RETRIES = 3
-_YEAR_RE = re.compile(r"\b(\d{4})\b")
 
 # the injected sync GET seam: (url, *, params, headers) -> parsed JSON dict (raises TaggingError)
 GetJson = Callable[..., dict[str, object]]
@@ -231,17 +230,6 @@ def build_musicbrainz_url(mbid: str, *, base_url: str = _MUSICBRAINZ_URL) -> str
     return f"{base_url.rstrip('/')}/recording/{mbid}?fmt=json&inc=artists+releases"
 
 
-def _parse_year(date_str: object) -> int | None:
-    """PURE: a leading 4-digit year from an MB date (``YYYY`` / ``YYYY-MM-DD``), bounded 1..9999."""
-    if not isinstance(date_str, str):
-        return None
-    m = _YEAR_RE.search(date_str)
-    if not m:
-        return None
-    year = int(m.group(1))
-    return year if 1 <= year <= 9999 else None
-
-
 def parse_recording(data: dict[str, object]) -> RecordingMetadata:
     """PURE: an MB recording JSON -> ``RecordingMetadata``. Artist is the joined artist-credit;
     album + year come from the first release. Every field is best-effort (sparse is fine)."""
@@ -252,7 +240,7 @@ def parse_recording(data: dict[str, object]) -> RecordingMetadata:
     album = year = None
     if releases:
         album = releases[0].get("title")
-        year = _parse_year(releases[0].get("date"))
+        year = parse_year(releases[0].get("date"))  # date is Any here; parse_year guards the type
     return RecordingMetadata(
         title=title if isinstance(title, str) else None,
         artist=artist,

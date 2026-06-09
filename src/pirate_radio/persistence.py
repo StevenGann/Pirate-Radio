@@ -18,14 +18,12 @@ vfat/overlay-on-SD for the state directory.
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from pathlib import Path
 from typing import TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from pirate_radio.durability import atomic_replace
+from pirate_radio.durability import write_bytes_durably
 from pirate_radio.errors import StateCorruptionError
 
 M = TypeVar("M", bound=BaseModel)
@@ -54,17 +52,7 @@ def atomic_write_json(path: Path, model: BaseModel, *, schema_version: int) -> N
     if path.exists():
         _replace_keep_bak(path)
 
-    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
-    tmp = Path(tmp_name)
-    try:
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(data)
-            fh.flush()
-            os.fsync(fh.fileno())
-        atomic_replace(tmp, path, strict=True)  # atomic rename + durable dir-fsync (R5; A7 strict)
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
+    write_bytes_durably(path, data, strict=True)  # temp→fsync→atomic rename + dir-fsync (R5; A7)
 
 
 def load_with_recovery(path: Path, model_type: type[M], *, schema_version: int) -> M:
@@ -106,15 +94,4 @@ def _replace_keep_bak(path: Path) -> None:
     replace succeeds.
     """
     bak = path.with_suffix(path.suffix + ".bak")
-    data = path.read_bytes()
-    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.bak.", suffix=".tmp")
-    tmp = Path(tmp_name)
-    try:
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(data)
-            fh.flush()
-            os.fsync(fh.fileno())
-        atomic_replace(tmp, bak, strict=True)
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
+    write_bytes_durably(bak, path.read_bytes(), strict=True)

@@ -128,6 +128,7 @@ async def _run_daemon(
             installed.append(sig)
         except (NotImplementedError, RuntimeError, ValueError):
             pass  # no signal support here (non-Unix / not the main thread / a test loop)
+    graceful = False
     try:
         await runner
     except asyncio.CancelledError:
@@ -136,12 +137,16 @@ async def _run_daemon(
         runner.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await runner
-        # clean shutdown: return normally (exit 0), do NOT re-raise
+        graceful = True  # the drain completed cleanly: return normally (exit 0), do NOT re-raise
     finally:
         for sig in installed:
             with contextlib.suppress(NotImplementedError, RuntimeError, ValueError):
                 loop.remove_signal_handler(sig)
-        offload_pool.shutdown(wait=False)
+        # On a GRACEFUL stop the drain has finished, so any outstanding offload (an in-flight
+        # schedule write) is bounded and short: wait for it so a clean stop never tears down mid
+        # fsync. On the abnormal/exception path don't block teardown (atomic_write_json is
+        # crash-safe either way, so an abandoned write is never corruption; a clean stop need be).
+        offload_pool.shutdown(wait=graceful)
 
 
 async def _isolated(coro: Coroutine[Any, Any, None], *, name: str) -> None:

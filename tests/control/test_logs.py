@@ -48,6 +48,27 @@ def test_emit_stamps_with_the_injected_clock() -> None:
     assert h.snapshot()[0].timestamp == clock.t  # not wall-time
 
 
+def test_emit_swallows_a_malformed_record_and_ring_stays_usable() -> None:
+    # cycle-3 isolation: emit() runs scrub + a pydantic LogEntry build in the CALLER's thread (the
+    # sink-write executor, uvicorn). If that ever raises it must NOT escape into the logging caller:
+    # it is routed through Handler.handleError instead, and the ring keeps working for good records.
+    boom = {"n": 0}
+
+    def _exploding_scrub(_msg: str) -> str:
+        boom["n"] += 1
+        if boom["n"] == 1:
+            raise ValueError("scrub blew up on this record")
+        return _msg
+
+    h = RingLogHandler(maxsize=10, clock=_Clock(), scrub=_exploding_scrub)
+    # the first record fails entry construction; emit MUST NOT raise out into the caller
+    h.emit(_rec("pirate_radio.x", logging.ERROR, "first (will fail)"))
+    assert h.snapshot() == []  # the bad record was dropped, not stored
+    # the ring is still usable — a subsequent good record lands normally
+    h.emit(_rec("pirate_radio.x", logging.INFO, "second (ok)"))
+    assert [e.message for e in h.snapshot()] == ["second (ok)"]
+
+
 def _entries() -> list[LogEntry]:
     base = datetime(2026, 6, 10, 12, 0, 0, tzinfo=UTC)
     return [

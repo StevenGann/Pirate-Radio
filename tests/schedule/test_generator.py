@@ -224,13 +224,7 @@ def test_block_transition_at_each_slot_boundary() -> None:
     # H1: the block_transition content duration is a named constant (pins the otherwise
     # free value so the station_id placement math below is well-defined).
     assert all(i.duration == _BLOCK_TRANSITION_SECONDS for i in transitions)
-    # The drift the station_id test tolerates: with a 3600s track each hour adds one
-    # station_id + one reminder of cumulative offset, on top of the opening transition.
-    # For station_ids to keep landing inside the 2-min top-of-hour window for the first
-    # few hours, that compounded drift must stay under 120s — pin the real relationship,
-    # not a loose < 120 bound (which would let a ~105s transition silently break it).
-    assert _BLOCK_TRANSITION_SECONDS > 0
-    assert _BLOCK_TRANSITION_SECONDS + 2 * (_STATION_ID_SECONDS + _BLOCK_REMINDER_SECONDS) < 120
+    assert _BLOCK_TRANSITION_SECONDS > 0  # H1: the transition content duration is pinned
 
     # The day opens with a transition into the first block. With no prior block, the
     # opening transition's block_name names the block it opens (slot 0).
@@ -263,13 +257,25 @@ def test_station_id_recurs_near_top_of_hour() -> None:
     ids = [i for i in sched.items if isinstance(i, StationIdItem)]
     assert len(ids) >= 3  # recurs across hours, not just the day-opening one
     assert all(i.duration == _STATION_ID_SECONDS == 5.0 for i in ids)  # H1 constant
-    # Placement rule (NOT a tautology — ids is filtered by TYPE, so a station_id placed
-    # mid-hour by a wrong impl would fail here): each airs within the top-of-hour window.
-    assert all(i.planned_start.minute < 2 for i in ids)
     hours = [i.planned_start.hour for i in ids]
     assert hours == sorted(hours)  # ascending in time
     assert len(set(hours)) == len(hours)  # de-duped: at most one per hour
-    assert hours[0] == 0  # the day opens with one; recurrence proven by len>=3 + unique
+    assert hours[0] == 0  # the day opens with one
+    # one id per distinct hour (general coverage is pinned by the realistic-tracks test below)
+
+
+def test_station_id_covers_every_hour_with_realistic_tracks() -> None:
+    # code-cycle DA HIGH: the once-per-hour station_id must fire for EVERY hour the slot spans, not
+    # only the hours where an item boundary lands in a 2-min top-of-hour window. With realistic
+    # (non-hour-aligned) tracks the cursor drifts past HH:02, and the old window-gated impl silently
+    # dropped the id for >half the day while still passing the hour-aligned test above.
+    cat = _catalog(_track("classical", "five", 300.0))  # 5-min tracks -> cursor drifts each hour
+    st = _station(transition_silence_seconds=2.0)
+    sched = generate_schedule(
+        grid=_ALLDAY_CLASSICAL, catalog=cat, station=st, clock=_clock(), seed=1
+    )
+    id_hours = {i.planned_start.hour for i in sched.items if isinstance(i, StationIdItem)}
+    assert id_hours == set(range(24))  # an all-day slot identifies the station every hour
 
 
 def test_block_reminder_in_long_slot() -> None:

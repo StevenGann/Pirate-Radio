@@ -54,10 +54,10 @@ async def post_json(
 
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:  # pragma: no cover (network)
-            resp = await client.post(url, headers=headers, json=body)  # pragma: no cover
-            if resp.status_code >= 400:  # pragma: no cover
+            resp = await client.post(url, headers=headers, json=body)  # pragma: no cover (network)
+            if resp.status_code >= 400:  # tested via the fake-httpx seam (no real socket)
                 raise map_http_status(provider, resp.status_code, resp.text)
-            return cast("dict[str, object]", resp.json())  # pragma: no cover
+            return cast("dict[str, object]", resp.json())
     except ProviderError:
         raise
     except Exception as exc:  # noqa: BLE001 — re-typed by the pure mapper

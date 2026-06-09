@@ -18,6 +18,7 @@ The one *intentional* difference is the dir-fsync policy, made explicit here per
 from __future__ import annotations
 
 import os
+import tempfile
 from pathlib import Path
 
 
@@ -45,3 +46,22 @@ def atomic_replace(tmp: Path, dst: Path, *, strict: bool) -> None:
     is durable. ``strict`` controls the dir-fsync policy (see the module docstring)."""
     os.replace(tmp, dst)
     fsync_dir(dst.parent, strict=strict)
+
+
+def write_bytes_durably(dst: Path, data: bytes, *, strict: bool) -> None:
+    """Crash-safely write ``data`` to ``dst``: a temp file in ``dst``'s OWN directory (so the rename
+    is a true same-filesystem atomic rename), fsync the file, then ``atomic_replace`` it into place
+    (which fsyncs the parent dir per ``strict``). Any failure unlinks the temp and re-raises, never
+    leaving a stray ``.tmp``. The single home for the temp→fsync→replace byte-write dance that
+    ``persistence`` performed twice (cycle-3 consolidation)."""
+    fd, tmp_name = tempfile.mkstemp(dir=dst.parent, prefix=f".{dst.name}.", suffix=".tmp")
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())  # the bytes are on disk before the rename
+        atomic_replace(tmp, dst, strict=strict)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise

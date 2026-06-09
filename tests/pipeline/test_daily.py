@@ -147,6 +147,16 @@ async def test_play_day_offset_past_decoded_frames_skips_first(_deterministic) -
     assert all(b.duration_seconds > 0 for b in sink.played)  # never an empty buffer
 
 
+async def test_play_day_resume_mid_patter_skips_the_stale_item(_deterministic) -> None:
+    # code-cycle: a resume landing INSIDE a patter item (station_id/intro) must SKIP it, not replay
+    # the half-spoken item from second 0 — so the NEXT item airs, not a restarted station ID.
+    a = _anchored([_id(), _track(100.0, 1)])
+    sink = FakeAudioSink()
+    await _run_play_day(a, _T0 + timedelta(seconds=2), sink)  # 2s into the 5s station_id
+    assert len(sink.played) == 1  # the stale station_id is dropped; only the next track airs
+    assert abs(sink.played[0].duration_seconds - 100.0) < 0.01  # the full track, not a replayed id
+
+
 async def test_play_day_past_end_of_day_airs_nothing(_deterministic) -> None:
     a = _anchored([_track(100.0, 1)])
     sink = FakeAudioSink()

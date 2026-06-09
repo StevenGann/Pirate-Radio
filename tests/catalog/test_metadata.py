@@ -22,7 +22,8 @@ from pathlib import Path
 import pytest
 
 import pirate_radio.catalog.metadata as md
-from pirate_radio.catalog.metadata import _first, _parse_year, read_metadata
+from pirate_radio.catalog.metadata import _first, read_metadata
+from pirate_radio.yeartag import parse_year as _parse_year
 
 
 def test_reads_duration_from_real_wav(content_tree: Path) -> None:

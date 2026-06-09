@@ -52,15 +52,22 @@ class RingLogHandler(logging.Handler):
         self._lock = threading.Lock()
 
     def emit(self, record: logging.LogRecord) -> None:
-        when = self._clock() if self._clock else datetime.fromtimestamp(record.created, tz=UTC)
-        entry = LogEntry(
-            timestamp=when,
-            level=record.levelname,
-            logger=record.name,
-            message=self._scrub(record.getMessage()),  # H22: scrub BEFORE storage
-        )
-        with self._lock:
-            self._entries.append(entry)
+        # A malformed record (a scrub/getMessage/LogEntry failure) must NEVER escape into the
+        # logging caller — which may be the sink-write executor or uvicorn (R23). Wrap the body in
+        # the stdlib-idiomatic try/handleError so a bad record is dropped, not propagated, and the
+        # ring stays usable for every well-formed record that follows (cycle-3 isolation).
+        try:
+            when = self._clock() if self._clock else datetime.fromtimestamp(record.created, tz=UTC)
+            entry = LogEntry(
+                timestamp=when,
+                level=record.levelname,
+                logger=record.name,
+                message=self._scrub(record.getMessage()),  # H22: scrub BEFORE storage
+            )
+            with self._lock:
+                self._entries.append(entry)
+        except Exception:  # noqa: BLE001 — stdlib Handler.emit contract: drop via handleError
+            self.handleError(record)
 
     def snapshot(self) -> list[LogEntry]:
         """A locked point-in-time copy so ``query_logs`` never iterates a mutating deque."""

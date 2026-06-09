@@ -40,7 +40,6 @@ _BLOCK_TRANSITION_SECONDS = 10.0  # DJ patter bridging two blocks (§8.4.1)
 _STATION_ID_SECONDS = 5.0  # top-of-hour station identification (§8.4.4)
 _BLOCK_REMINDER_SECONDS = 8.0  # "you're listening to <block>" (§8.4.3)
 _BLOCK_REMINDER_EVERY = timedelta(minutes=30)  # §8.4 "periodically in long slots"
-_TOP_OF_HOUR_MINUTES = 2  # a station_id fires only within this window after HH:00
 _RECENT_DOWNWEIGHT = 0.05  # weight for a track played within the repeat window (H2: soft)
 
 _MIDNIGHT = time(0, 0)
@@ -89,8 +88,10 @@ def generate_schedule(
         last_id_hour: int | None = None
         last_reminder = cursor
         while (boundary - cursor).total_seconds() >= shortest:
-            # §8.4.4 station_id near each top-of-hour (once per hour).
-            if cursor.minute < _TOP_OF_HOUR_MINUTES and cursor.hour != last_id_hour:
+            # §8.4.4 station_id once per hour: fire at the FIRST item of each new clock-hour. NOT
+            # gated on a top-of-hour minute window — the soft-boundary cursor drifts past HH:02 over
+            # the day, so a window gate silently dropped the id for most hours (code-cycle DA HIGH).
+            if cursor.hour != last_id_hour:
                 items.append(
                     StationIdItem(
                         planned_start=cursor, duration=_STATION_ID_SECONDS, block_name=slot.name

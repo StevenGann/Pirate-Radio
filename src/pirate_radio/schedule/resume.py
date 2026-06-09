@@ -49,6 +49,18 @@ class NowPlaying:
 
 
 @dataclass(frozen=True)
+class _Located:
+    """Where ``now`` falls on the timeline — the single bisect result both ``find_now`` and
+    ``slice_from`` build their (differently-shaped) answers from. ``index`` is the airing item
+    (``airing``), the next item (a gap), or ``len(items)`` (past end-of-day → empty slice)."""
+
+    airing: bool
+    index: int
+    offset: float
+    gap: float
+
+
+@dataclass(frozen=True)
 class AnchoredSchedule:
     """A schedule with its R12-re-anchored timeline precomputed once (H4).
 
@@ -61,20 +73,32 @@ class AnchoredSchedule:
     starts: tuple[datetime, ...]
     ends: tuple[datetime, ...]
 
-    def find_now(self, now: datetime) -> NowPlaying:
-        # Rightmost item whose start is <= now (start-inclusive). bisect over the strictly
-        # increasing `starts` makes this O(log n) per tick.
+    def _locate(self, now: datetime) -> _Located:
+        """The ONE bisect: classify ``now`` as airing / in-a-gap / past-end (H4). Both ``find_now``
+        and ``slice_from`` derive from this so the timeline logic lives in a single place."""
+        # Rightmost item whose start is <= now (start-inclusive); end-exclusive airing check.
         idx = bisect.bisect_right(self.starts, now) - 1
-        if idx >= 0 and now < self.ends[idx]:  # end-exclusive: now is inside this item
-            nxt = self.items[idx + 1] if idx + 1 < len(self.items) else None
-            return NowPlaying(self.items[idx], (now - self.starts[idx]).total_seconds(), nxt, 0.0)
+        if idx >= 0 and now < self.ends[idx]:  # now is inside items[idx]
+            return _Located(True, idx, (now - self.starts[idx]).total_seconds(), 0.0)
+        nxt = bisect.bisect_right(self.starts, now)  # first item starting after now
+        if nxt < len(self.items):  # before-first / in a silence gap (R11): play the gap, then go on
+            return _Located(False, nxt, 0.0, (self.starts[nxt] - now).total_seconds())
+        return _Located(False, len(self.items), 0.0, 0.0)  # past the last item -> regenerate
 
-        # Not inside any item: before-first, in a silence gap, or past end-of-day.
-        nxt_idx = bisect.bisect_right(self.starts, now)  # first item starting after now
-        if nxt_idx < len(self.items):  # R11: play the remaining gap, then advance
-            gap = (self.starts[nxt_idx] - now).total_seconds()
-            return NowPlaying(None, 0.0, self.items[nxt_idx], gap)
-        return NowPlaying(None, 0.0, None, 0.0)  # past the last item -> regenerate
+    def find_now(self, now: datetime) -> NowPlaying:
+        loc = self._locate(now)
+        if loc.airing:
+            nxt = self.items[loc.index + 1] if loc.index + 1 < len(self.items) else None
+            return NowPlaying(self.items[loc.index], loc.offset, nxt, 0.0)
+        if loc.index < len(self.items):  # R11 gap before items[index]
+            return NowPlaying(None, 0.0, self.items[loc.index], loc.gap)
+        return NowPlaying(None, 0.0, None, 0.0)
+
+    def slice_from(self, now: datetime) -> tuple[list[ScheduleItem], float, float]:
+        """``(items from now to end-of-day, seek offset into the first, leading gap seconds)`` —
+        the play-slice view of ``_locate`` (``find_now`` is the resume view of the same bisect)."""
+        loc = self._locate(now)
+        return list(self.items[loc.index :]), loc.offset, loc.gap
 
 
 def anchor(schedule: DailySchedule, *, transition_silence: float) -> AnchoredSchedule:

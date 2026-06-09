@@ -13,6 +13,8 @@ from pathlib import Path
 import mutagen
 from pydantic import BaseModel, ConfigDict
 
+from pirate_radio.yeartag import parse_year
+
 
 class TrackMetadata(BaseModel):
     """Raw, normalized metadata for one file. ``duration`` is required and > 0."""
@@ -50,7 +52,7 @@ def read_metadata(path: Path) -> TrackMetadata | None:
         title=_first(tags, ("title", "TIT2", "\xa9nam")),
         artist=_first(tags, ("artist", "TPE1", "\xa9ART")),
         album=_first(tags, ("album", "TALB", "\xa9alb")),
-        year=_parse_year(_first(tags, ("date", "year", "TDRC", "\xa9day"))),
+        year=parse_year(_first(tags, ("date", "year", "TDRC", "\xa9day"))),
     )
 
 
@@ -71,21 +73,4 @@ def _first(tags: object, keys: tuple[str, ...]) -> str | None:
         text = text.strip()
         if text:
             return text
-    return None
-
-
-def _parse_year(value: str | None) -> int | None:
-    """Extract a plausible 4-digit year from a free-form date tag; None otherwise.
-
-    Bounded to 1..9999 so the scanner can never build a ``Track`` with an
-    out-of-range ``year`` (amendment A10) — a garbage tag yields None, not a crash.
-    """
-    if not value:
-        return None
-    for token in value.replace("/", "-").split("-"):
-        token = token.strip()
-        if len(token) == 4 and token.isdigit():
-            year = int(token)
-            if 1 <= year <= 9999:
-                return year
     return None

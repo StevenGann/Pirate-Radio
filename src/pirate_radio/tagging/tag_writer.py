@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 import shutil
 from collections.abc import Callable
 from pathlib import Path
@@ -23,8 +22,7 @@ from typing import Any
 from pirate_radio.durability import atomic_replace
 from pirate_radio.errors import TaggingFatal
 from pirate_radio.tagging.models import RecordingMetadata, TagPlan
-
-_YEAR_RE = re.compile(r"\b(\d{4})\b")
+from pirate_radio.yeartag import parse_year
 
 logger = logging.getLogger(__name__)
 
@@ -94,12 +92,9 @@ def read_existing_tags(path: Path) -> RecordingMetadata:
         value = audio.get(key)
         return value[0] if value else None
 
-    date = _first("date")
-    year_match = _YEAR_RE.search(date) if date else None
-    year = int(year_match.group(1)) if year_match else None
     return RecordingMetadata(
         title=_first("title"),
         artist=_first("artist"),
         album=_first("album"),
-        year=year if year is not None and 1 <= year <= 9999 else None,
+        year=parse_year(_first("date")),  # bounded 1..9999 (A10), shared leaf
     )
