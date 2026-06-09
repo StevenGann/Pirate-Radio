@@ -48,7 +48,7 @@ The defining design goal, borrowed from FieldStation42, is **broadcast realism**
 | **Grid** (a.k.a. *format clock*) | The hand-authored template mapping time-of-day → group. The *intent*. |
 | **Slot** | One time range within a grid, bound to a single group. |
 | **Daily Schedule** | The concrete, generated, ordered list of items for one calendar day. The *realized instance* of the grid. |
-| **ScheduleItem** | One unit in the daily schedule: a track, a station ID, a bumper, or a DJ announcement, with a planned airtime. |
+| **ScheduleItem** | One unit in the daily schedule: a track, a station ID, a block transition, or a block reminder, with a planned airtime. (The canned R11 backstop is **not** a ScheduleItem — it is a pre-rendered audio fallback, kept distinct.) |
 | **Segment** | What the player actually streams for one item: optional intro + content + optional outro. |
 | **Producer** | Per-station task that renders upcoming items just ahead of the playhead (LLM patter → TTS → assembled audio). |
 | **Player (Consumer)** | Per-station task that drains the look-ahead buffer and streams to the audio device. |
@@ -69,6 +69,26 @@ The defining design goal, borrowed from FieldStation42, is **broadcast realism**
 ```
 
 One process, N stations, N audio devices, N transmitters on distinct frequencies. RF concerns (SWR, intermodulation, antenna/patch routing) are handled in hardware and are out of scope for this document.
+
+### 4.1 Deployment / Hardware (per D1 / decision 0002)
+
+**Stations-per-Pi-model guideline** (on-Pi compute = ffmpeg decode + loudness + Piper TTS ×N; LLM inference is off-box, see §21/D2):
+
+| Pi model | Tier | Notes |
+|---|---|---|
+| **Pi 3 / 1 GB** | single-station **demo** | RAM-bound; requires 64-bit **Bookworm**. |
+| **Pi 4 / 4 GB** | **4-station baseline** | medium-quality voices, staggered patter, **active cooling required**. |
+| **Pi 5 / 4 GB** | **recommended** | 4 stations comfortably. |
+
+The design does **not** require 8 GB.
+
+**24/7 appliance requirements.** This runs as an always-on broadcaster, so:
+
+- **Active cooling is REQUIRED** (especially at the 4-station tier — sustained multi-core load throttles a passively-cooled SoC; see §17).
+- **SSD / USB boot** rather than running long-term off the SD card (mutable writes already kept off the boot SD via `state_dir` and `PrivateTmp`).
+- **Official PSU** (under-volt warnings under load otherwise) and a **powered USB hub** for the multiple USB audio dongles + transmitters.
+
+**RF legality (acknowledgment).** FM transmission is **regulated** — e.g. US **FCC Part 15** field-strength limits, with equivalents elsewhere. Operating legality (license/power/antenna) is the **deployer's responsibility**; it is out of scope for the *code* but acknowledged here (§21/D7-style). A **wired or stream-only** deployment sidesteps the RF question entirely.
 
 ## 5. Architecture
 
@@ -110,7 +130,7 @@ LLM patter generation and TTS synthesis take seconds. The naive "play file → s
 
 - The **producer** assembles complete segments ahead of time and pushes them into a **bounded queue** (`asyncio.Queue`).
 - The **player** pulls from the queue and streams gaplessly.
-- Queue depth = look-ahead buffer (depth 1–2 is sufficient).
+- Queue depth = look-ahead buffer, sized to mask the worst patter cluster (`worst_consecutive_patter + 1`; realistically 2). The RAM budget that bounds it is **Appendix A**.
 
 Slow generation stalls *buffer refill*, never playback.
 
@@ -118,7 +138,7 @@ Slow generation stalls *buffer refill*, never playback.
 
 Each station is an isolated unit under a supervisor (the "let it crash" / watchdog model). If a station task dies, the supervisor restarts it to a known-good state without affecting the others.
 
-**v1 decision:** stations are `asyncio` tasks under one supervisor (lightweight, shared caches/clients). The known risk is that a hard crash in a native audio library (a segfault, not a Python exception) takes the whole process down. **Mitigation:** keep the station boundary a clean interface so that, if a native library proves unstable, *only the player* can later be promoted to a subprocess without restructuring the rest. Do not build subprocess isolation up front.
+**v1 decision:** stations are `asyncio` tasks under one supervisor (lightweight, shared caches/clients). The known risk is that a hard crash in a native audio library (a segfault, not a Python exception) takes the whole process down — and the **in-process supervisor cannot catch a SIGSEGV**. **Mitigation (per R13):** the actual SIGSEGV recovery is the **`systemd` unit (R7)**, which restarts the whole process. Keep the station boundary a clean interface, but do **not** promise a drop-in subprocess promotion — if a native library proves unstable enough to need subprocess isolation, **expect a real refactor** (the look-ahead buffer, shared clients, and sink handoff all cross the boundary). Do not build subprocess isolation up front.
 
 ## 6. The Broadcast-Time Model
 
@@ -136,7 +156,7 @@ def find_now(schedule: DailySchedule, now: datetime) -> tuple[ScheduleItem | Non
     return None, 0.0
 ```
 
-**Drift:** `planned_start` is an *estimate*, because real TTS length is unknown until synthesis (track durations are exact from metadata). Drift is small and bounded; v1 accepts it. A later refinement re-anchors at hourly station IDs (let the ID float a few seconds, or trim the preceding gap) so drift never compounds past an hour.
+**Drift:** `planned_start` is an *estimate*, because real TTS length is unknown until synthesis (track durations are exact from metadata). The player advances by the **actual** rendered length of each segment, while `find_now` reconstructs the timeline from each item's **estimated** duration — so a mid-day resume seek is *approximate* to within the accumulated patter-estimate error up to that point. *(Correction adopted during implementation: the shipped `schedule/resume.py::anchor` re-anchors the timeline once per day-slice from `items[0].planned_start` (the slice's exact start instant) — it does **not** re-anchor hourly or at station IDs. The real bound on intra-day drift is therefore the **next same-day regeneration / day-roll re-slice**, which rebuilds the timeline from a fresh exact anchor; there is no "never compounds past an hour" guarantee. v1 accepts the accumulated estimate error within a slice.)*
 
 > **Phase-1 correction (H13, implemented in `schedule/resume.py`).** The sketch above
 > returns a bare `(item, None)` which is ambiguous about silence gaps. The shipped
@@ -148,11 +168,26 @@ def find_now(schedule: DailySchedule, now: datetime) -> tuple[ScheduleItem | Non
 > drifted stored `planned_start` cannot mislead playback). The lookup is anchored once
 > and answered per tick by binary search (**H4**). See `docs/decisions/0011`–`0012`.
 
+**Clock assumptions & DST policy (D6/R9).** Because schedule selection and the day-roll
+are wall-clock-driven, the daemon assumes a **time-synced clock**:
+
+- **Startup is gated on a corrected clock.** The shipped `systemd/pirate-radio.service`
+  declares `After=… time-sync.target …`, so on an RTC-less Pi the daemon does not start
+  (and anchor the day) until the OS has stepped the clock — a cold boot before time-sync
+  would otherwise pin the day to a bogus instant.
+- **DST policy (the one explicit policy D6 required).** Datetimes are tz-aware; the
+  schedule is generated on **local wall positions**, and the timeline advances by **real
+  elapsed seconds** (the day-roll sleep uses real seconds-to-midnight — 23 h spring-forward,
+  25 h fall-back, via `zoneinfo`). Consequence at the fold: the **fall-back repeated hour is
+  not re-aired**, and the **spring-forward gap is skipped** — the broadcast simply tracks
+  real time across the transition. No special re-airing or pause logic.
+
 ## 7. Content Organization & Catalog
 
 - The station's `content_dir` contains one **subfolder per group** (`classical/`, `oldies/`, `radio_plays/`, …).
 - On startup (and on demand), the **catalog scanner** walks the tree, reads tags via `mutagen`, and indexes each track tagged with its parent folder name. This mirrors FieldStation42's directory-as-tag approach.
 - Track duration comes from metadata and is treated as exact for scheduling.
+- **Runtime coherence.** The catalog is scanned at startup, but content can change out-of-band afterward. A persisted schedule item whose content file has **vanished or become corrupt by render time** is not a special case here — it is caught by the in-band render-poison/backstop policy in the producer (§9.3, §14): the item is backstopped and playback advances, never crashing the station.
 
 **Offline tagging (separate tool).** Untagged or poorly tagged files are handled by a **standalone batch tool**, *not* at runtime. It uses Chromaprint (`fpcalc`) for acoustic fingerprints, `pyacoustid` for lookup, and `musicbrainzngs` for metadata — the engine underneath MusicBrainz Picard. Reasons it must be offline: fingerprinting is slow, and the MusicBrainz API requests ≤ 1 request/second, which four live stations would violate immediately. Tag once, ahead of time; the radio reads clean tags.
 
@@ -231,7 +266,9 @@ Persist the result as `<state_dir>/<station>/<YYYY-MM-DD>.json`. *(Correction ad
 
 ### 8.6 Midnight regeneration
 
-A coordinator-level task sleeps until the next midnight, then regenerates each station's schedule for the new day. The in-flight segment at the rollover is **not** interrupted; the player finishes it, then splices onto the new day's schedule at the next boundary.
+A coordinator-level task sleeps until the next midnight, then regenerates each station's schedule for the new day. The in-flight segment at the rollover is **not** interrupted; the player finishes it, then splices onto the new day's schedule at the next boundary. A regen failure in one station is logged CRITICAL and isolated — siblings still roll, and the failed station keeps today's schedule (a bad tomorrow-grid must not kill today at 00:00).
+
+> *(Correction adopted during implementation, per `midnight.py`.)* The cross-day splice is **not seamless**. Only **schedule prewarm** is delivered — the new day's file is written **before** the day-roll Event is set (the file-then-event ordering), so the station re-slices onto a schedule already on disk. **Audio prewarm across the day boundary was NOT built**: rendering the new day's opening cluster during the outgoing day's final item would mean churning the frozen in-flight `run_once`, which is forbidden. So at the boundary the splice falls back to the **bounded R11 canned backstop** — the same one-cluster, one-refill-budget backstop as a cold start, **audible as a bumper** (not silence). The day boundary is therefore **backstop-covered, not warm-buffered**: it is explicitly carved out of R11's "deeper/warm buffer at block boundaries" guarantee.
 
 ### 8.7 Loading & reload behavior
 
@@ -258,7 +295,7 @@ LLMs will confidently invent facts about obscure tracks. **Every patter prompt i
 2. **Block context** — the current slot's `name`, `tagline`, and `description` (and, for transitions/reminders, the next slot's, plus its start time). The `description` can also steer delivery (e.g. "speaks softly here").
 3. **Track metadata** — title, artist, album, year from the catalog.
 
-The prompt instructs the model to speak in persona and invent no facts. Because the entire day is decided in advance, block announcements ("next up at noon, Lunchtime Theater") are always accurate — a direct payoff of pre-generating the schedule. The producer hands this to the `TextGenerator` as the `dj_context`, e.g. for a `block_transition`:
+The prompt instructs the model to speak in persona and to assert no facts beyond the supplied grounding. *(Per §21.7: grounding **reduces** fabrication of metadata facts but cannot fully eliminate tone/emphasis drift — treat it as a strong constraint, not a guarantee.)* Because the entire day is decided in advance, block announcements ("next up at noon, Lunchtime Theater") are always accurate — a direct payoff of pre-generating the schedule. The producer builds this grounding into a typed **`DjContext`** (R16, §13) and hands it to `TextGenerator.patter` — conceptually the payload below, for a `block_transition` (the shipped model uses typed `BlockContext`/`TrackMeta` sub-models rather than the bare JSON shown):
 
 ```json
 {
@@ -277,8 +314,9 @@ A per-station **DJ persona** (string or file, see §12) is the constant voice; t
 The DJ must never cause dead air, so resilience is layered:
 
 - **Ranked provider failover.** Both the LLM and TTS are configured as an *ordered* list of providers (§12). On a connection failure or quota/availability error, the system falls through to the next provider in the list. The LLM chain is **all network providers** — `Claude → DeepSeek → a self-hosted Ollama server on the LAN` (Ollama runs on a network host, **not** on the Pi; see §21/D2). For voice, local **Piper** on the Pi is the always-available floor. When *every* network LLM provider (including the LAN Ollama server) is unreachable, the true DJ-brain floor is **NullDJ / pre-rendered patter** (the final fallback below), and the canned-audio backstop (§21/R11) guarantees no dead air. A TTS fallback may change the station's voice — an acceptable degradation.
-- **Best-effort patter on sparse metadata.** A track with incomplete tags is **not** skipped; the DJ generates best-effort patter from whatever metadata exists (and still invents nothing — grounding from §9.2 holds, just with less to work with).
+- **Best-effort patter on sparse metadata.** A track with incomplete tags is **not** skipped; the DJ generates best-effort patter from whatever metadata exists (and is still constrained not to assert facts beyond the grounding — the §9.2 grounding holds, just with less to work with; tone/emphasis drift can't be fully eliminated).
 - **Final fallback.** If every provider in a chain fails, fall back to a pre-rendered generic intro, or play the track dry. This rule is mandatory throughout the pipeline.
+- **Item-level render poison (backstopped in-band).** *(Correction adopted during implementation, per `pipeline/producer.py`.)* Beyond provider failover and the buffer-miss backstop, the producer backstops **any render exception per item, in-band**, and always advances to the next item — it never propagates the failure or crash-loops the station. A `ProviderError` is backstopped at **WARNING**; any other exception (a C-level decode crash on a corrupt file, `MemoryError`, a code bug) is backstopped at **CRITICAL**. This also covers a **missing or corrupt content file at render time** (the catalog is scanned at startup, so content can change out-of-band — see §7). There is **no skip path in the supervisor**: poison is handled entirely in-band, so an "unrenderable content item" can never escape to crash the process. A persistent station-tagged CRITICAL flood is the operator's signal to investigate.
 
 ## 10. Audio Pipeline
 
@@ -298,11 +336,16 @@ class TTSEngine(Protocol):
     async def synthesize(self, text: str) -> AudioBuffer: ...
 
 class TextGenerator(Protocol):          # the "DJ brain"
-    async def patter(self, kind: str, context: dict) -> str: ...
+    # the kind is carried by context.kind (R16); the bare `kind` param was removed (decision 0040).
+    async def patter(self, context: DjContext | None) -> str: ...
 
 class AudioSink(Protocol):
     async def play(self, buf: AudioBuffer) -> None: ...
 ```
+
+*(Correction adopted during implementation: `patter` takes the typed `DjContext` (R16, §9.2), not a bare `dict`, and the separate `kind` argument was dropped — the item kind lives in `context.kind` (decision 0040).)*
+
+**Error & threading contract (R15).** Every backend method raises a `ProviderError` (hierarchy: `ProviderUnavailable` / `ProviderQuotaExceeded` / `ProviderFatal`) on failure — failover retries only the retryable branch, and the pipeline catches any escape to fire the R11 backstop. Protocol docstrings state units, idempotency, and threading: **blocking native implementations MUST hop via `asyncio.to_thread`** so they never stall the shared event loop. `AudioSink` is additionally an **async context manager** — `__aenter__`/`__aexit__` open/tear down the device/stream, entered once per station lifetime.
 
 Planned implementations:
 
@@ -320,9 +363,8 @@ The daemon reads a single top-level **`config.json`**, validated with **Pydantic
     "providers": [
       { "backend": "claude",   "model": "<set to a current model id>", "api_key_env": "ANTHROPIC_API_KEY" },
       { "backend": "deepseek", "model": "<set to a current model id>",                "api_key_env": "DEEPSEEK_API_KEY" },
-      { "backend": "ollama",   "model": "llama3.1",                     "endpoint": "http://localhost:11434" }
-    ],
-    "max_requests_per_minute": 20
+      { "backend": "ollama",   "model": "llama3.1",                     "endpoint": "http://ollama.lan:11434" }
+    ]
   },
   "tts_providers": {
     "elevenlabs": { "api_key_env": "ELEVENLABS_API_KEY" },
@@ -391,22 +433,63 @@ class Grid(BaseModel):
     name: str
     slots: list[Slot]
 
-ItemKind = Literal["track", "station_id", "bumper", "block_transition", "block_reminder"]
+ItemKind = Literal["track", "station_id", "block_transition", "block_reminder"]
 
-class ScheduleItem(BaseModel):
-    kind: ItemKind
-    planned_start: datetime
-    duration: float
-    track: Track | None = None
-    block_name: str | None = None      # the block (slot name) this item belongs to
+# (Correction adopted during implementation, R17: ScheduleItem is a *discriminated union*
+# on `kind`, not a single class with nullable fields — invalid states are unrepresentable.
+# All variants share planned_start (tz-aware, D6) + duration + block_name; only TrackItem
+# carries a Track. `dj_context` is NOT a stored field — it is the typed `DjContext` (R16,
+# below) the producer builds at render time, never persisted. There is NO "bumper" kind:
+# the canned backstop is a pre-rendered AudioBuffer, not a ScheduleItem.)
+
+class _ItemBase(BaseModel):                 # frozen, extra="forbid"
+    planned_start: datetime                 # tz-aware (D6); estimate for patter (R12)
+    duration: float                         # content-only seconds; transition silence is separate
+    block_name: str
+
+class TrackItem(_ItemBase):
+    kind: Literal["track"] = "track"
+    track: Track                            # required -> a track item without a Track is impossible
     intro: bool = False
     outro: bool = False
-    dj_context: dict | None = None     # grounded facts for patter (see §9.2)
+
+class StationIdItem(_ItemBase):
+    kind: Literal["station_id"] = "station_id"
+
+class BlockTransitionItem(_ItemBase):
+    kind: Literal["block_transition"] = "block_transition"
+    next_block_name: str
+    next_block_starts_at: datetime          # tz-aware
+
+class BlockReminderItem(_ItemBase):
+    kind: Literal["block_reminder"] = "block_reminder"
+
+ScheduleItem = Annotated[
+    TrackItem | StationIdItem | BlockTransitionItem | BlockReminderItem,
+    Field(discriminator="kind"),
+]
 
 class DailySchedule(BaseModel):
     date: date
     station: str
-    items: list[ScheduleItem]
+    seed: int                               # the RNG seed used (R19 reproducibility record)
+    items: tuple[ScheduleItem, ...]
+    # persisted with a schema_version envelope (R17, SCHEDULE_SCHEMA_VERSION) by persistence.py
+
+# The grounded patter context (R16, §9.2) — typed, frozen, built at render time, never persisted:
+class TrackMeta(BaseModel):                  # title/artist/album/year, all optional (§9.3 sparse-ok)
+    ...
+class BlockContext(BaseModel):               # name (required) + tagline/description/boundary_at
+    ...
+class DjContext(BaseModel):
+    kind: str                                # the patter type (§9.1)
+    persona: str
+    station_name: str
+    station_tagline: str | None = None
+    current_block: BlockContext
+    next_block: BlockContext | None = None   # transitions/reminders only
+    track: TrackMeta | None = None           # intro/outro/factoid only
+    recent_tracks: tuple[TrackMeta, ...] = ()
 
 class StationConfig(BaseModel):
     name: str
@@ -416,29 +499,42 @@ class StationConfig(BaseModel):
     content_dir: Path                        # root of this station's group subfolders
     dj_personality: str | None = None        # inline persona prompt
     dj_personality_file: Path | None = None  # OR a path relative to schedule_dir (exactly one set)
-    tts: list[dict]                          # ranked TTS providers (backend + params)
+    tts: tuple[TTSConfig, ...]               # R16: ranked discriminated union on `backend`
+                                             #   = PiperTTSConfig | EspeakTTSConfig | ElevenLabsTTSConfig
     audio_device: str
+    llm: LLMConfig | None = None             # optional per-station override (§12)
     transition_silence_seconds: float = 2.0  # hard-cut gap between elements
-    loudness_target_lufs: float = -16.0
+    loudness_target_lufs: float = -16.0      # le=0, ge=-40 (EBU R128)
     repeat_window_minutes: int = 120         # don't replay a track within this window
 
+# R16: no bare dicts in the model layer — providers are discriminated unions on `backend`.
+class LLMConfig(BaseModel):
+    providers: tuple[LLMProviderConfig, ...]            # ClaudeLLMConfig | DeepSeekLLMConfig | OllamaLLMConfig
+    request_timeout_seconds: float = 20.0              # per-call timeout -> failover (no rate limiter, see §12)
+
 class DaemonConfig(BaseModel):
-    llm: dict                                # { providers: [ranked], max_requests_per_minute }
-    tts_providers: dict                      # shared provider credentials / endpoints
-    stations: list[StationConfig]
+    llm: LLMConfig                                      # shared ranked chain (R16)
+    tts_providers: dict[str, dict[str, object]] = {}    # raw on the wire; parsed once into typed
+                                                        # TTSProviderConfig (Piper/Espeak/ElevenLabs) at validation
+    state_dir: Path                                     # A6: mutable-state root off the boot SD
+    decode_timeout_seconds: float = 120.0
+    tts_timeout_seconds: float = 30.0
+    stations: tuple[StationConfig, ...]
+    control: ControlConfig | None = None               # Phase 6 / D4: None => control API off
 ```
 
 ## 14. Failure Handling & Resilience
 
 - **Supervision:** crashed station tasks are restarted by the coordinator's supervisor.
 - **Never dead air:** every generation step has a fallback path (§9.3).
+- **Item-level render poison:** any render exception (not only `ProviderError`) is backstopped **in-band** by the producer (ProviderError → WARNING, anything else → CRITICAL) and the item advances; the supervisor has **no skip path** — poison never propagates or crash-loops a station. Covers a missing/corrupt content file discovered at render time (§9.3, §7).
 - **Provider failover:** LLM and TTS each fail through a ranked provider list; local Ollama/Piper are the always-available floor.
 - **Persistence:** all state is **flat JSON** — catalog, daily schedules, and resume state. Schedules are written to disk and read back on resume. (No database; kept deliberately simple.)
 - **Quotas:** not designed around in v1. Quota exhaustion is handled *reactively* by provider failover rather than proactive budgeting. MusicBrainz (≤ 1 req/s) remains confined to the offline tagging tool.
 
 ## 15. Control API (in scope)
 
-The daemon exposes a **RESTful API** (FastAPI) for inspection and control — the single-process architecture makes this clean, since one process owns all station state. Structured logs are flat JSON (§14), so a log-query endpoint reads and filters them directly. Proposed endpoints:
+The daemon exposes a **RESTful API** (FastAPI) for inspection and control — the single-process architecture makes this clean, since one process owns all station state. Structured logs go to journald/stdout (§14, R8′); the `GET /logs` endpoint serves a **bounded in-memory ring** (RAM-only, lossy across restarts) for a live view, with journald as the durable archive (§21/R8′). Proposed endpoints:
 
 | Method & path | Purpose |
 |---|---|
@@ -447,7 +543,7 @@ The daemon exposes a **RESTful API** (FastAPI) for inspection and control — th
 | `GET /stations/{name}/now` | Now playing: current item, block, and playback offset. |
 | `GET /stations/{name}/schedule?date=YYYY-MM-DD` | The day's generated schedule (defaults to today). |
 | `POST /stations/{name}/regenerate` | Rebuild today's schedule for the station. |
-| `POST /stations/{name}/skip` | Skip the current item. |
+| `POST /stations/{name}/skip` | Skip at the **next** boundary: drop the next buffered item (one-shot). Cannot cut the currently-airing segment — that would break gaplessness. Returns `202 Accepted`. |
 | `GET /logs?station=&level=&since=&limit=` | **Query logs** — filter by station, level, and time window. |
 
 The API binds to the homelab network; authentication (e.g. a bearer token) and a browser UI on top of these endpoints are later additions. The web console / phone remote envisioned earlier becomes a thin client over this API.
@@ -476,10 +572,11 @@ The API binds to the homelab network; authentication (e.g. a bearer token) and a
 | Risk | Mitigation |
 |---|---|
 | LLM fabricates factoids | Strict metadata/schedule grounding; persona framing; optional `NullDJ`. |
-| Native audio library crashes whole process | Clean station boundary; promote player to subprocess if it proves unstable. |
-| Schedule drift over the day | Accept in v1; re-anchor at hourly IDs later. |
+| Native audio library crashes whole process | Clean station boundary; **systemd (R7) is the actual SIGSEGV recovery** (the in-process supervisor cannot catch one). Expect a **real refactor** if the native lib proves unstable enough to warrant subprocess isolation — not a drop-in promotion (R13). |
+| Schedule drift over the day | Accept in v1; the timeline re-anchors from an exact start at each day-slice / regeneration (§6). No hourly re-anchor shipped. |
 | Cloud API failure / quota exhaustion | Ranked provider failover; local Ollama/Piper as the always-available floor. |
 | Slot/track misalignment | Fully soft boundaries by design; the fill rule keeps the gap under one item. |
+| **Thermal throttling under sustained 24/7 load** | Sustained multi-core load (decode + loudness + Piper ×N, plus synchronized top-of-hour bursts) heats the SoC → CPU throttles → renders miss refill deadlines → the R11 backstop fires (audible bumpers). Mitigation: **active cooling** (required at the 4-station tier, §4.1) **+ the per-station render stagger** (`lookahead.stagger_offset`) so N stations don't fire renders on the same tick. |
 
 ## 18. Proposed Tech Stack
 
@@ -503,8 +600,10 @@ The API binds to the homelab network; authentication (e.g. a bearer token) and a
 
 ## 19. Proposed Module Layout
 
+> *(Correction adopted during implementation: the **actual** shipped layout lives under `src/pirate_radio/` (src-layout), and has drifted from this "Proposed" sketch — e.g. `clock.py`, `errors.py`, `midnight.py`, `lookahead.py`, `audio_devices.py`, `scrub.py`, `pipeline/segment.py`/`timing.py`/`daily.py`, `dj/context.py`/`protocols.py`/`failover.py`/`build.py`/`fakes.py`, `control/api.py`/`service.py`/`models.py`/`logs.py`, `audio/binaries.py`, and the `tagging/` package. Treat the tree below as indicative intent; `src/pirate_radio/` is the ground truth.)*
+
 ```
-pirate_radio/
+src/pirate_radio/
   __main__.py            # entry point — starts the coordinator
   config.py              # Pydantic config models + loader + validation
   coordinator.py         # daemon: supervises stations, owns shared services
@@ -608,9 +707,15 @@ Where a resolution conflicts with earlier prose above, **this section governs.**
   in-process supervisor owns **tasks**. *(Updates §5.4, §14.)*
 - **R8′ — Logging.** State stays flat JSON; **logs go to journald/stdout** (platform
   rotation/retention; off-box shipping available), transient writes to `tmpfs` to
-  spare the SD card. A `GET /logs` endpoint may exist but **must be backed by a
-  journald query or an indexed SQLite store — never a linear scan of an
-  append-only JSON file.** *(Updates §14, §15.)*
+  spare the SD card. *(Resolution amended — ratified deviation, decisions 0057/0062.)*
+  The original wording ("`GET /logs` must be backed by a journald query or an indexed
+  SQLite store — never a linear scan") is **superseded**. As shipped (`control/logs.py`),
+  `GET /logs` is a **bounded in-memory ring** (`deque(maxlen=N)`) with a **PURE linear
+  filter** over the snapshot. It is **RAM-only** (never touches the SD card, H26),
+  **R23-safe** (no disk I/O in the handler), and **lossy across restarts and shallow**
+  (last N records only). **journald remains the durable source of truth** for deep
+  history (`journalctl`); the ring is a convenience/live view, not the archive.
+  *(Updates §14, §15.)*
 - **R9 — Timezone-aware clock + DST.** Use **tz-aware datetimes** throughout; define
   explicit behavior at the DST fold (spring gap / fall repeat) and on NTP/clock-set
   jumps. **Per client (D6): use the system local timezone and trust the system clock as correct — no RTC/clock-step defensive logic; tz-aware datetimes still let `zoneinfo` handle DST.** *(Updates §6.)*
@@ -628,7 +733,9 @@ Where a resolution conflicts with earlier prose above, **this section governs.**
   **deeper/warm buffer at block boundaries**. **Define the `find_now` `None`/gap
   path:** play the residual `transition_silence` gap as silence and advance to the
   next item's `planned_start` (or return next-item + wait rather than `None`).
-  *(Updates §5.3, §6, §8.4.)*
+  **Carve-out (per implementation, §8.6):** the **day boundary** is **not** warm-buffered —
+  audio prewarm across midnight was not built, so the day-roll splice is covered by the
+  bounded canned backstop (audible-as-bumper), the same as a cold start. *(Updates §5.3, §6, §8.4.)*
 - **R12 — Bound schedule drift in v1.** Because `planned_start` for patter is an
   estimate, either **pull the hourly re-anchor into v1** or **re-anchor `find_now`
   on the nearest exact-duration track** (don't trust persisted estimated
@@ -700,4 +807,26 @@ Where a resolution conflicts with earlier prose above, **this section governs.**
 - **RF legality.** Operating four FM transmitters is a **licensing/regulatory
   matter** (e.g. FCC Part 15 field-strength limits in the US; equivalents
   elsewhere) that the **deployer owns**. RF remains out of scope for the *code*,
-  but the constraint is acknowledged here. *(Acknowledgment added to §4 context.)*
+  but the constraint is acknowledged here. *(Acknowledgment added to §4.1.)*
+
+---
+
+## Appendix A — Look-ahead RAM budget model
+
+*(Documents the shipped model in `src/pirate_radio/lookahead.py`; referenced by §5.3, §13, and §21. The whole module is pure — no clock, IO, or hardware — and is wired by the coordinator at boot.)*
+
+The producer renders **serially**, so the only thing that keeps it ahead of a short-patter cluster is a look-ahead buffer deep enough to pre-render the whole cluster **while the preceding multi-minute track plays** (the track masks the serial renders). The coordinator computes the coupled quantities once at boot from the resolved config + each station's schedule.
+
+**Buffer cost.** Each look-ahead slot holds **one whole-track `float32` `AudioBuffer`** — about **11.5 MB per minute** (mono @ 48 kHz: `seconds × sample_rate × channels × 4 bytes`). Speech segments are far smaller; the budget is sized against the longest **track**.
+
+**Buffer depth.** `depth = worst_consecutive_patter + 1` — the longest run of consecutive non-track items (a patter cluster), plus the one masking-track slot being consumed. The generator's realistic worst case is 2 (`block_transition` + `station_id` at a top-of-hour). An all-track schedule still needs depth 1. This `depth` is passed to the look-ahead queue (`run_once(maxsize=depth)`).
+
+**Fixed RAM budget.** `_LOOKAHEAD_RAM_BUDGET_BYTES ≈ 1.6 GB` (≈ 40% of a 4 GB Pi's total RAM, sized for the 4 GB / 4-station target). It is **deliberately a fixed constant, NOT a `psutil`-derived fraction of free RAM**: the boot result must be **byte-identical across reboots** so a config that fails fast at 3 a.m. fails the same way every time. No `psutil` dependency.
+
+**Resident slack.** The budget covers `depth + _RESIDENT_SLACK_SLOTS` (**+2**) whole-track buffers **per station** — the queue **plus** the segment the player popped and is writing, **plus** the segment the producer finished and is blocked trying to `put`. So the boundary is honest, not optimistic by two tracks.
+
+**Fail-fast, never clamp.** `resolve_lookahead_depth` returns the needed depth only if the fixed budget affords the real resident peak across **all** stations (`n_stations × (depth + slack) × worst_track_bytes ≤ budget`); otherwise it raises a `ConfigError` naming the fix (reduce stations, shorten the longest track, or raise the budget). A **silent clamp to an affordable-but-shallower depth is rejected** — a buffer shallower than the worst cluster can't pre-render it during the masking track, which would silently regress to a sustained R11 backstop loop (the C1 bug).
+
+**Render stagger.** `stagger_offset(i) = i × 2.0 s` — a deterministic (no-RNG, reproducible) per-station initial render delay so N stations don't fire Piper/cloud renders on the same tick (the 4-core thundering herd at synchronized top-of-hour IDs). See the thermal-throttling risk in §17.
+
+**Worst-case render.** `worst_case_patter_render = Σ LLM-chain timeouts + Σ TTS-chain timeouts` (a hung backend burns its full timeout before the ranked chain fails over); used to decide the cold-start startup WARNING.
