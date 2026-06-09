@@ -128,5 +128,14 @@ disallow_untyped_defs = true
 no_implicit_optional = true
 
 [[tool.mypy.overrides]]
-module = ["mutagen.*", "pyloudnorm.*", "scipy.*", "sounddevice.*"]
+module = ["pyloudnorm.*", "scipy.*", "sounddevice.*"]
 ignore_missing_imports = true
+
+# mutagen ships py.typed in some releases, but its top-level `File` is re-exported lazily in a way
+# mypy resolves INCONSISTENTLY across environments — flip-flopping between `attr-defined` (ignore
+# needed) and `unused-ignore` (ignore not), which broke CI. Skip-following it so it is uniformly
+# untyped (Any) everywhere; the only boundary is `_open_mutagen -> Any`, so nothing is lost.
+[[tool.mypy.overrides]]
+module = ["mutagen"]
+ignore_missing_imports = true
+follow_imports = "skip"

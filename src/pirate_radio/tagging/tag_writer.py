@@ -64,7 +64,7 @@ def _atomic_apply(path: Path, changes: dict[str, str | int], write_tags: WriteTa
 def _open_mutagen(path: Path) -> Any:  # pragma: no cover (R20/R21: real container open needs codec)
     import mutagen  # lazy
 
-    return mutagen.File(path, easy=True)  # type: ignore[attr-defined]  # File re-exported lazily
+    return mutagen.File(path, easy=True)  # mutagen treated as untyped (mypy follow_imports=skip)
 
 
 def _mutagen_write(path: Path, changes: dict[str, str | int]) -> None:
