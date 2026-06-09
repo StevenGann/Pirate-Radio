@@ -13,7 +13,7 @@
   },
   "tts_providers": {
     "elevenlabs": { "api_key_env": "ELEVENLABS_API_KEY" },
-    "piper": { "binary": "/opt/piper/piper", "voices_dir": "/mnt/ssd/voices" },
+    "piper": { "voices_dir": "/mnt/ssd/voices" },
     "espeak": {}
   },
   "stations": [

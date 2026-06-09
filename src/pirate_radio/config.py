@@ -67,8 +67,12 @@ class ElevenLabsTTSConfig(BaseModel):
 # attributes, not dicts.
 class PiperProviderConfig(BaseModel):
     model_config = _FROZEN
-    binary: Path | None = None  # H16: NO PATH fallback (Debian `piper` is a mouse tool)
-    voices_dir: Path  # required: where {voice}.onnx lives (keep on FAST storage — H15)
+    # piper1-gpl (OHF-Voice, the maintained fork) runs as `python -m piper` — there is no console
+    # script. `python` is the interpreter whose venv has `piper-tts` installed; None -> the daemon's
+    # own sys.executable (where `pip install piper-tts` lands in the deploy venv). No PATH binary,
+    # so the old Debian-`piper`-is-a-mouse-tool footgun (H16) is gone.
+    python: Path | None = None
+    voices_dir: Path  # where {voice}.onnx (+ .onnx.json) live (keep on FAST storage — H15)
 
 
 class EspeakProviderConfig(BaseModel):

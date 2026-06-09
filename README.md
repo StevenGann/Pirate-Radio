@@ -72,11 +72,14 @@ The daemon preflights them at startup (fail-fast, §12) and the error names the 
 - **ffmpeg** — `apt install ffmpeg` (decode). Override the path with `ffmpeg_binary` in
   `config.json` if it is not on `PATH`.
 - **espeak-ng** — `apt install espeak-ng` (fallback voice). Found on `PATH` by default.
-- **piper** (primary voice) — **not** the Debian `piper` package (that is an unrelated mouse
-  configurator). Download piper-TTS from <https://github.com/rhasspy/piper/releases>, then set
-  `tts_providers.piper.binary` to its path (there is **no `PATH` fallback** for piper) and put
-  each voice's `{voice}.onnx` in `tts_providers.piper.voices_dir`. **Keep `voices_dir` on fast
-  storage (USB SSD / NVMe), not the boot SD** — piper reloads the model per call.
+- **piper** (primary voice) — the maintained **piper1-gpl** fork (`pip install piper-tts`;
+  <https://github.com/OHF-Voice/piper1-gpl>). The original `rhasspy/piper` is archived; the Debian
+  `piper` package is an unrelated mouse configurator — don't use either. Install `piper-tts` into the
+  daemon's venv (`.venv/bin/pip install piper-tts`); the daemon then runs it as `python -m piper`
+  (no `binary` path needed — `tts_providers.piper.python` overrides the interpreter only if piper
+  lives in a *separate* venv). Put each voice's `{voice}.onnx` (+ `{voice}.onnx.json`) in
+  `tts_providers.piper.voices_dir` (download via `python -m piper.download_voices <voice>`). **Keep
+  `voices_dir` on fast storage (USB SSD / NVMe), not the boot SD** — piper reloads the model per call.
 
 Annotated `config.json` excerpt for a Phase-2 station:
 
@@ -86,7 +89,7 @@ Annotated `config.json` excerpt for a Phase-2 station:
   "decode_timeout_seconds": 120,             // ffmpeg decode kill-switch (H14)
   "tts_timeout_seconds": 30,                 // piper/espeak kill-switch (H14)
   "tts_providers": {
-    "piper":  { "binary": "/opt/piper/piper", "voices_dir": "/mnt/ssd/voices" },
+    "piper":  { "voices_dir": "/mnt/ssd/voices" },  // pip install piper-tts; run as python -m piper
     "espeak": { }                            // binary omitted -> resolved from PATH
   },
   "stations": [{
@@ -141,7 +144,7 @@ the Phase-3-specific parts (ranked LLM + ranked TTS):
   },
   "tts_providers": {
     "elevenlabs": { "api_key_env": "ELEVENLABS_API_KEY" },
-    "piper":      { "binary": "/opt/piper/piper", "voices_dir": "/mnt/ssd/voices" }
+    "piper":      { "voices_dir": "/mnt/ssd/voices" }   // pip install piper-tts; run as python -m piper
   },
   "stations": [{
     "tts": [                                         // ranked: ElevenLabs first, Piper as the local floor

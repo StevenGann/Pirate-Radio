@@ -13,6 +13,7 @@ import asyncio
 import io
 import logging
 import subprocess
+import sys
 import tempfile
 import wave
 from pathlib import Path
@@ -70,12 +71,16 @@ def wav_bytes_to_buffer(raw: bytes) -> AudioBuffer:
     return _s16le_to_buffer(pcm, sample_rate=rate, channels=ch)
 
 
-def build_piper_argv(binary: str, model: Path, out_path: str, *, speed: float) -> list[str]:
-    """PURE incl. speed math: piper ``--length_scale = 1/speed`` (guard speed > 0)."""
+def build_piper_argv(python: str, model: Path, out_path: str, *, speed: float) -> list[str]:
+    """PURE incl. speed math: piper ``--length_scale = 1/speed`` (guard speed > 0). Invokes the
+    piper1-gpl module (``python -m piper``); ``--model`` takes the ``.onnx`` path, ``--output_file``
+    /``--length_scale`` are the fork's compatible aliases, and text is fed on stdin."""
     if speed <= 0:
         raise ProviderFatal(f"piper: speed must be > 0, got {speed}")
     return [
-        binary,
+        python,
+        "-m",
+        "piper",
         "--model",
         str(model),
         "--output_file",
@@ -108,7 +113,9 @@ def _map_tts_error(engine: str, returncode: int, stderr: bytes) -> ProviderError
     lines = stderr.decode("utf-8", "replace").strip().splitlines()
     tail = lines[-1] if lines else f"exit {returncode}"
     lowered = tail.lower()
-    if any(s in lowered for s in ("voice", "model", "not found")):
+    # "no such file" / "onnx" catch a missing model OR its companion .onnx.json (piper's
+    # FileNotFoundError tail) — a permanent misconfig, NOT a retryable transient (panel DA).
+    if any(s in lowered for s in ("voice", "model", "not found", "no such file", "onnx")):
         return ProviderFatal(f"{engine} bad voice/model: {tail}")
     return ProviderUnavailable(f"{engine} failed (exit {returncode}): {tail}")  # retryable default
 
@@ -123,7 +130,7 @@ def _map_tts_exception(engine: str, binary: str, exc: Exception) -> ProviderErro
 
 
 class PiperTTS:
-    """Local neural TTS (primary). Requires an explicit binary (H16: no PATH fallback)."""
+    """Local neural TTS (primary): the piper1-gpl fork, run as ``python -m piper`` (no binary)."""
 
     def __init__(
         self,
@@ -133,13 +140,11 @@ class PiperTTS:
         sample_rate: int = DEFAULT_SAMPLE_RATE,
         timeout_seconds: float = 30.0,  # H14
     ) -> None:
-        if provider.binary is None:  # H16: no PATH fallback for piper
-            raise ProviderFatal(
-                "piper: tts_providers.piper.binary is required (Debian 'piper' is an unrelated "
-                "mouse tool; set the explicit piper-TTS path)"
-            )
         self._cfg = cfg
-        self._binary = str(provider.binary)
+        # `python -m piper` (piper1-gpl): default to the daemon's own interpreter, where
+        # `pip install piper-tts` naturally lands; an operator with piper in a separate venv sets
+        # tts_providers.piper.python. (No PATH binary -> the old Debian-`piper` footgun is gone.)
+        self._python = str(provider.python) if provider.python else sys.executable
         self._model = provider.voices_dir / f"{cfg.voice}.onnx"
         self._sample_rate = sample_rate
         self._timeout = timeout_seconds
@@ -150,12 +155,12 @@ class PiperTTS:
         try:
             buf = await asyncio.to_thread(self._run_to_buffer, text)  # R21: off the loop
         except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
-            raise _map_tts_exception("piper", self._binary, exc) from exc
+            raise _map_tts_exception("piper", self._python, exc) from exc
         return to_rate(buf, self._sample_rate)  # H5
 
     def _run_to_buffer(self, text: str) -> AudioBuffer:
         with tempfile.NamedTemporaryFile(suffix=".wav") as tmp:  # H15: per-call, unique
-            argv = build_piper_argv(self._binary, self._model, tmp.name, speed=self._cfg.speed)
+            argv = build_piper_argv(self._python, self._model, tmp.name, speed=self._cfg.speed)
             proc = subprocess.run(  # pragma: no cover  (R20: the ONLY hardware line)
                 argv,
                 input=text.encode("utf-8"),

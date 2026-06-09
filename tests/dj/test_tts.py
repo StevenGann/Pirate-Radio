@@ -139,10 +139,11 @@ def test_map_tts_exception_classification() -> None:
 # --- argv builders (pure, incl. speed/pitch math) -------------------------------
 
 
-def test_piper_argv_includes_model_output_and_length_scale() -> None:
-    argv = build_piper_argv("piper", Path("/v/en.onnx"), "/tmp/o.wav", speed=2.0)
-    assert argv[0] == "piper"
-    assert "/v/en.onnx" in argv
+def test_piper_argv_invokes_the_module_with_model_output_and_length_scale() -> None:
+    # piper1-gpl runs as `python -m piper` with the .onnx path + the fork's compatible flags.
+    argv = build_piper_argv("/venv/bin/python", Path("/v/en.onnx"), "/tmp/o.wav", speed=2.0)
+    assert argv[:3] == ["/venv/bin/python", "-m", "piper"]  # module invocation, not a binary
+    assert argv[argv.index("--model") + 1] == "/v/en.onnx"  # --model takes the .onnx path
     assert argv[argv.index("--output_file") + 1] == "/tmp/o.wav"
     # speed math: length_scale = 1/speed -> 0.5 (in the PURE builder, unit-tested)
     assert float(argv[argv.index("--length_scale") + 1]) == pytest.approx(0.5)
@@ -150,7 +151,7 @@ def test_piper_argv_includes_model_output_and_length_scale() -> None:
 
 def test_piper_argv_rejects_non_positive_speed() -> None:
     with pytest.raises(ProviderFatal):
-        build_piper_argv("piper", Path("/v/en.onnx"), "/tmp/o.wav", speed=0.0)
+        build_piper_argv("/venv/bin/python", Path("/v/en.onnx"), "/tmp/o.wav", speed=0.0)
 
 
 def test_espeak_argv_maps_voice_speed_pitch() -> None:
@@ -175,7 +176,7 @@ def test_espeak_argv_rejects_non_positive_speed() -> None:
 def _piper() -> PiperTTS:
     return PiperTTS(
         cfg=PiperTTSConfig(backend="piper", voice="en_US-ryan-high", speed=1.0),
-        provider=PiperProviderConfig(binary=Path("/opt/piper"), voices_dir=Path("/v")),
+        provider=PiperProviderConfig(python=Path("/venv/bin/python"), voices_dir=Path("/v")),
         sample_rate=48_000,
     )
 
@@ -184,13 +185,17 @@ def test_piper_satisfies_tts_protocol() -> None:
     assert isinstance(_piper(), TTSEngine)
 
 
-def test_piper_without_binary_is_fatal() -> None:
-    # H16: piper has no PATH fallback; an unset binary fails loudly at construction.
-    with pytest.raises(ProviderFatal):
-        PiperTTS(
-            cfg=PiperTTSConfig(backend="piper", voice="en", speed=1.0),
-            provider=PiperProviderConfig(binary=None, voices_dir=Path("/v")),
-        )
+def test_piper_python_defaults_to_the_daemon_interpreter() -> None:
+    # No `python` configured -> the daemon's own sys.executable (where `pip install piper-tts`
+    # lands); construction never fails for a missing binary (the old H16 footgun is gone).
+    import sys
+
+    piper = PiperTTS(
+        cfg=PiperTTSConfig(backend="piper", voice="en", speed=1.0),
+        provider=PiperProviderConfig(voices_dir=Path("/v")),  # python unset
+    )
+    assert piper._python == sys.executable
+    assert isinstance(piper, TTSEngine)
 
 
 async def test_piper_empty_text_returns_zero_silence_at_station_rate() -> None:
@@ -212,11 +217,13 @@ async def test_piper_synthesize_resamples_to_station_rate(monkeypatch) -> None:
     assert float(np.sqrt(np.mean(out.samples.astype(np.float64) ** 2))) > 0.4  # energy survived
 
 
-async def test_piper_missing_binary_at_run_maps_to_fatal(monkeypatch) -> None:
+async def test_piper_missing_interpreter_at_run_maps_to_fatal(monkeypatch) -> None:
+    # a misconfigured `python` (interpreter not found) -> FileNotFoundError -> ProviderFatal
+    # (skip to the espeak floor; retrying a missing interpreter is pointless).
     dec = _piper()
 
     def _boom(text):
-        raise FileNotFoundError("piper")
+        raise FileNotFoundError("/venv/bin/python")
 
     monkeypatch.setattr(dec, "_run_to_buffer", _boom)
     with pytest.raises(ProviderFatal):
@@ -239,7 +246,7 @@ async def test_piper_synthesize_builds_argv_and_forwards_timeout(monkeypatch) ->
     # --output_file path and captures argv/kwargs. Proves argv construction + timeout wiring.
     dec = PiperTTS(
         cfg=PiperTTSConfig(backend="piper", voice="en_US-ryan-high", speed=2.0),
-        provider=PiperProviderConfig(binary=Path("/opt/piper"), voices_dir=Path("/voices")),
+        provider=PiperProviderConfig(python=Path("/venv/bin/python"), voices_dir=Path("/voices")),
         sample_rate=48_000,
         timeout_seconds=55.0,
     )
@@ -254,7 +261,7 @@ async def test_piper_synthesize_builds_argv_and_forwards_timeout(monkeypatch) ->
     monkeypatch.setattr(subprocess, "run", _fake_run)
     out = await dec.synthesize("coming up next")
     argv = captured["argv"]
-    assert argv[0] == "/opt/piper"
+    assert argv[:3] == ["/venv/bin/python", "-m", "piper"]  # `python -m piper` (piper1-gpl)
     assert "/voices/en_US-ryan-high.onnx" in argv  # voices_dir/{voice}.onnx
     assert float(argv[argv.index("--length_scale") + 1]) == pytest.approx(0.5)  # 1/speed
     assert captured["kwargs"].get("timeout") == 55.0  # H14

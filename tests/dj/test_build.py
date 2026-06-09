@@ -158,7 +158,7 @@ def test_build_tts_engine_maps_all_three(monkeypatch: pytest.MonkeyPatch) -> Non
     config = _config(
         station,
         tts_providers={
-            "piper": {"binary": "/opt/piper/piper", "voices_dir": "/voices"},  # H16: binary
+            "piper": {"voices_dir": "/voices"},  # piper1-gpl: python -m piper, no binary
             "espeak": {},
             "elevenlabs": {"api_key_env": "ELEVENLABS_API_KEY"},
         },

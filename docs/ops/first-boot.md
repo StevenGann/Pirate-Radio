@@ -50,7 +50,13 @@ sudo chown pirate:pirate /opt/pirate-radio
 cd /opt/pirate-radio
 python3 -m venv .venv
 .venv/bin/pip install -e .
+# Optional, for the Piper neural voice — the maintained piper1-gpl fork (rhasspy/piper is archived):
+.venv/bin/pip install piper-tts
+.venv/bin/python -m piper.download_voices en_US-ryan-high   # into tts_providers.piper.voices_dir
 ```
+
+Piper runs as `python -m piper` from this venv (no `binary` path; set `tts_providers.piper.python`
+only if you install it in a *separate* venv). Keep `voices_dir` on the SSD (it reloads per call).
 
 ## 3. Create the service user + state dir
 

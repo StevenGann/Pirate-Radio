@@ -5,8 +5,8 @@ configured station actually uses is missing — but in a SEPARATE function the d
 entrypoint calls, NOT inside ``_validate_config`` (H20: the config test suite validates
 piper-station configs without real binaries). Pinned:
   - explicit path: must exist AND be executable; errors NAME the remedy (H13/H19);
-  - PATH lookup for ffmpeg/espeak; piper has NO PATH fallback (H16: Debian `piper` is a
-    mouse tool) — an unset piper binary is a ConfigError pointing at the piper-TTS release;
+  - PATH lookup for ffmpeg/espeak; **piper** is the piper1-gpl module (``python -m piper``) —
+    preflight verifies it's importable by the configured interpreter, ConfigError → the fork if not;
   - per-station ``voices_dir/{voice}.onnx`` existence;
   - espeak with no ``tts_providers.espeak`` block defaults to a PATH lookup, never KeyError (H15).
 """
@@ -98,29 +98,71 @@ def test_preflight_ok_for_espeak_station(monkeypatch) -> None:
     preflight_binaries(cfg)  # must not raise (espeak defaults to PATH lookup, H15)
 
 
-def test_preflight_piper_without_binary_is_fatal_with_mouse_warning(monkeypatch) -> None:
+def _piper_module(monkeypatch, *, importable: bool = True, raises: Exception | None = None) -> None:
+    # stub the `python -m piper` import probe so the rest of the preflight is exercised offline.
+    # ``raises`` simulates subprocess.run itself blowing up (bad interpreter path / timeout).
+    import subprocess
+
+    def _run(argv, **kwargs):
+        if raises is not None:
+            raise raises
+        rc = 0 if importable else 1
+        return subprocess.CompletedProcess(argv, rc, b"", b"" if importable else b"No module piper")
+
+    monkeypatch.setattr(subprocess, "run", _run)
+
+
+def test_preflight_piper_not_importable_points_at_the_fork(monkeypatch) -> None:
     _all_present(monkeypatch)
+    _piper_module(monkeypatch, importable=False)  # `python -m piper` import fails
     cfg = _config(
         stations_tts=[{"backend": "piper", "voice": "en_US-ryan-high"}],
-        tts_providers={"piper": {"voices_dir": "/opt/voices"}},  # binary unset
+        tts_providers={"piper": {"voices_dir": "/opt/voices"}},
     )
-    # match="mouse" pins the H16 operator-actionable warning, not just any piper-mentioning error.
-    with pytest.raises(ConfigError, match="mouse"):
+    # the remedy must name the maintained fork (rhasspy/piper is archived), not a binary path.
+    with pytest.raises(ConfigError, match="piper-tts"):
+        preflight_binaries(cfg)
+
+
+def test_preflight_piper_interpreter_unrunnable_points_at_the_fork(monkeypatch) -> None:
+    # subprocess.run itself fails (bad `python` path / FileNotFoundError) -> ConfigError
+    # "cannot run", not a traceback. Exercises the `except (FileNotFoundError, SubprocessError)`.
+    _all_present(monkeypatch)
+    _piper_module(monkeypatch, raises=FileNotFoundError("/no/such/python"))
+    cfg = _config(
+        stations_tts=[{"backend": "piper", "voice": "en_US-ryan-high"}],
+        tts_providers={"piper": {"voices_dir": "/opt/voices", "python": "/no/such/python"}},
+    )
+    with pytest.raises(ConfigError, match="cannot run"):
         preflight_binaries(cfg)
 
 
 def test_preflight_piper_missing_voice_model_is_fatal(monkeypatch, tmp_path: Path) -> None:
     _all_present(monkeypatch)
-    piper = tmp_path / "piper"
-    piper.write_text("#!/bin/sh\n")
-    piper.chmod(0o755)
+    _piper_module(monkeypatch, importable=True)  # module ok; the voice .onnx is what's missing
     voices = tmp_path / "voices"
     voices.mkdir()  # exists but the {voice}.onnx is absent
     cfg = _config(
         stations_tts=[{"backend": "piper", "voice": "en_US-ryan-high"}],
-        tts_providers={"piper": {"binary": str(piper), "voices_dir": str(voices)}},
+        tts_providers={"piper": {"voices_dir": str(voices)}},
     )
-    with pytest.raises(ConfigError, match="voice model not found"):
+    with pytest.raises(ConfigError, match="voice file not found"):
+        preflight_binaries(cfg)
+
+
+def test_preflight_piper_missing_onnx_json_companion_is_fatal(monkeypatch, tmp_path: Path) -> None:
+    # piper loads BOTH {voice}.onnx AND {voice}.onnx.json. A present .onnx but missing .json must
+    # fail at BOOT — else it surfaces only at first synth as a failover-retried error (panel DA).
+    _all_present(monkeypatch)
+    _piper_module(monkeypatch, importable=True)
+    voices = tmp_path / "voices"
+    voices.mkdir()
+    (voices / "en_US-ryan-high.onnx").write_bytes(b"onnx")  # model present, .onnx.json absent
+    cfg = _config(
+        stations_tts=[{"backend": "piper", "voice": "en_US-ryan-high"}],
+        tts_providers={"piper": {"voices_dir": str(voices)}},
+    )
+    with pytest.raises(ConfigError, match=r"voice file not found.*\.onnx\.json"):
         preflight_binaries(cfg)
 
 
@@ -128,15 +170,14 @@ def test_preflight_piper_all_present_ok_and_logs(monkeypatch, tmp_path: Path, ca
     import logging
 
     _all_present(monkeypatch)
-    piper = tmp_path / "piper"
-    piper.write_text("#!/bin/sh\n")
-    piper.chmod(0o755)
+    _piper_module(monkeypatch, importable=True)
     voices = tmp_path / "voices"
     voices.mkdir()
     (voices / "en_US-ryan-high.onnx").write_bytes(b"onnx")
+    (voices / "en_US-ryan-high.onnx.json").write_bytes(b"{}")  # companion config piper auto-loads
     cfg = _config(
         stations_tts=[{"backend": "piper", "voice": "en_US-ryan-high"}],
-        tts_providers={"piper": {"binary": str(piper), "voices_dir": str(voices)}},
+        tts_providers={"piper": {"voices_dir": str(voices)}},
     )
     with caplog.at_level(logging.INFO, logger="pirate_radio.audio.binaries"):
         preflight_binaries(cfg)  # must not raise

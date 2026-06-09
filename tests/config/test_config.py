@@ -500,12 +500,12 @@ def test_typed_piper_provider_parsed(
 ) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
     data = _valid_config(content_tree, grid_yaml)
-    data["tts_providers"] = {"piper": {"binary": "/opt/piper/piper", "voices_dir": "/opt/voices"}}
+    data["tts_providers"] = {"piper": {"python": "/venv/bin/python", "voices_dir": "/opt/voices"}}
     cfg = _load(tmp_path, data, resolver, fixed_clock)
     prov = cfg.provider("piper")
     assert isinstance(prov, PiperProviderConfig)
     assert prov.voices_dir == Path("/opt/voices")
-    assert prov.binary == Path("/opt/piper/piper")
+    assert prov.python == Path("/venv/bin/python")
 
 
 def test_piper_provider_extra_inner_key_rejected(
@@ -589,6 +589,6 @@ def test_typed_provider_survives_model_copy(
     # else a boot path that copies the config gets a wrong "no block" error for piper.
     monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
     data = _valid_config(content_tree, grid_yaml)
-    data["tts_providers"] = {"piper": {"binary": "/p", "voices_dir": "/v"}}
+    data["tts_providers"] = {"piper": {"voices_dir": "/v"}}
     cfg = _load(tmp_path, data, resolver, fixed_clock)
     assert isinstance(cfg.model_copy().provider("piper"), PiperProviderConfig)
