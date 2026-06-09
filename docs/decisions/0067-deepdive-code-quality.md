@@ -69,6 +69,19 @@ a genuine shipped bug that CI was green on.
   shared `tagging` constants imported across modules (Old Man LOW); the dead `ElevenLabsTTS(provider=)`
   param (Old Man LOW).
 
+## Re-poll: 5/5 CONFIRM
+
+Senior Dev re-verified H1+H2 (and the resume-mid-patter bonus) CLOSED → flipped to CONFIRM. The DA
+re-verified the station-ID fix across 8 seeds with a varied catalog (exactly 24 IDs, all hours 0–23,
+no block_reminder regression, R19 determinism intact) → CONFIRM. All five reviewers CONFIRM.
+
+The DA surfaced one **pre-existing, harmless** edge while verifying (NOT a regression, NOT the bug
+fixed): a grid slot boundary falling mid-hour (e.g. an 08:30 slot change) yields **two** station IDs
+in that hour — one per slot — because `last_id_hour` resets to `None` inside the per-slot loop. This is
+over-identification (an extra ID, never a dropped one), legal/harmless, and existed in the old code.
+Carry-forward (LOW): carry `last_id_hour` across slots for strict once-per-hour at mid-hour block
+boundaries.
+
 ## Gate
 
 ruff + ruff-format + mypy `--strict` clean (64 source files); **881 tests** (+5), 97.63% coverage.
