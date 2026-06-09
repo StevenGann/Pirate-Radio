@@ -9,14 +9,26 @@ MusicBrainz HTTP clients here, both going through their own `RateLimiter` (≈3 
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
-from pirate_radio.errors import TaggingFatal
-from pirate_radio.tagging.models import Fingerprint
+from pirate_radio.errors import (
+    TaggingFatal,
+    TaggingThrottled,
+    TaggingUnavailable,
+)
+from pirate_radio.tagging.models import AcoustIdMatch, Fingerprint
 
 _FPCALC_LENGTH_SECONDS = 120  # fingerprint only the first 120 s — bounds per-file CPU (RPi)
+_ACOUSTID_URL = "https://api.acoustid.org/v2/lookup"
+_ACOUSTID_INTERVAL_SECONDS = 0.34  # AcoustID ≈3 req/s per key
+_DEFAULT_MAX_RETRIES = 3
+
+# the injected sync GET seam: (url, *, params, headers) -> parsed JSON dict (raises TaggingError)
+GetJson = Callable[..., dict[str, object]]
 
 
 class RateLimiter:
@@ -106,3 +118,104 @@ class FpcalcFingerprinter:
         self, argv: list[str]
     ) -> subprocess.CompletedProcess[bytes]:  # pragma: no cover (R20: the only hardware line)
         return subprocess.run(argv, capture_output=True, check=False, timeout=self._timeout)
+
+
+def request_json(
+    get_json: GetJson,
+    limiter: RateLimiter,
+    *,
+    max_retries: int = _DEFAULT_MAX_RETRIES,
+    **kwargs: object,
+) -> dict[str, object]:
+    """Rate-limited GET with retry-and-rearm (shared by AcoustID + MusicBrainz). Each attempt waits
+    its limiter slot; a ``TaggingThrottled`` (429/503) re-arms the limiter by ``Retry-After`` and
+    retries, so a throttled service is never hammered. All throttled -> ``TaggingUnavailable``."""
+    last: TaggingThrottled | None = None
+    for _ in range(max_retries):
+        limiter.acquire()
+        try:
+            return get_json(**kwargs)
+        except TaggingThrottled as exc:
+            limiter.note_throttle(exc.retry_after_seconds)
+            last = exc
+    raise TaggingUnavailable(f"request throttled after {max_retries} attempts") from last
+
+
+def acoustid_key(env_name: str) -> str:
+    """Read the AcoustID key from the env BY NAME at call time (H22). The error names the VAR,
+    never a value; the key is placed only in the request params at the GET seam, never logged."""
+    value = os.environ.get(env_name, "").strip()
+    if not value:
+        raise TaggingFatal(f"AcoustID key env var {env_name!r} is not set or empty")
+    return value
+
+
+def build_acoustid_params(key: str, fingerprint: Fingerprint) -> dict[str, object]:
+    """PURE: the AcoustID lookup query params (integer duration; recordings metadata requested)."""
+    return {
+        "client": key,
+        "duration": int(fingerprint.duration),
+        "fingerprint": fingerprint.fingerprint,
+        "meta": "recordings",
+    }
+
+
+def parse_acoustid_response(data: dict[str, object]) -> tuple[AcoustIdMatch, ...]:
+    """PURE: AcoustID JSON -> recording matches (MBID + result score), sorted highest-first. A
+    non-``ok`` status is ``TaggingFatal``; missing fields are tolerated (sparse is fine)."""
+    if data.get("status") != "ok":
+        raise TaggingFatal(f"acoustid: status {data.get('status')!r}")
+    matches: list[AcoustIdMatch] = []
+    for result in cast("list[dict[str, Any]]", data.get("results", [])):
+        score = result.get("score")
+        if score is None:
+            continue
+        for rec in result.get("recordings", []):
+            rid = rec.get("id")
+            if rid:
+                matches.append(AcoustIdMatch(recording_id=rid, score=score))
+    return tuple(sorted(matches, key=lambda m: (-m.score, m.recording_id)))
+
+
+class AcoustIdClient:
+    """AcoustID lookup over the injected sync GET seam, rate-limited (≈3 req/s) with retry-rearm."""
+
+    def __init__(
+        self,
+        api_key_env: str,
+        *,
+        limiter: RateLimiter,
+        get_json: GetJson | None = None,
+        base_url: str = _ACOUSTID_URL,
+    ) -> None:
+        self._key_env = api_key_env
+        self._limiter = limiter
+        self._get_json = get_json or _default_get_json
+        self._url = base_url
+
+    def lookup(self, fingerprint: Fingerprint) -> tuple[AcoustIdMatch, ...]:
+        params = build_acoustid_params(acoustid_key(self._key_env), fingerprint)
+        data = request_json(self._get_json, self._limiter, url=self._url, params=params)
+        return parse_acoustid_response(data)
+
+
+def _default_get_json(  # pragma: no cover (R20/R21: the only network line; tests inject get_json)
+    url: str, *, params: dict[str, object] | None = None, headers: dict[str, str] | None = None
+) -> dict[str, object]:
+    import httpx  # lazy (R21)
+
+    try:
+        resp = httpx.get(url, params=cast("Any", params), headers=headers, timeout=20.0)
+    except Exception as exc:  # noqa: BLE001 — transport error -> retryable
+        raise TaggingUnavailable(f"GET {url} failed: {type(exc).__name__}") from exc
+    if resp.status_code in (429, 503):
+        retry_after = resp.headers.get("Retry-After")
+        raise TaggingThrottled(
+            f"{resp.status_code} from {url}",
+            retry_after_seconds=float(retry_after)
+            if retry_after and retry_after.isdigit()
+            else None,
+        )
+    if resp.status_code >= 400:
+        raise TaggingFatal(f"{resp.status_code} from {url}")
+    return cast("dict[str, object]", resp.json())

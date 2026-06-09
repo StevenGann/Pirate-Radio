@@ -13,14 +13,19 @@ from pathlib import Path
 
 import pytest
 
-from pirate_radio.errors import TaggingFatal
+from pirate_radio.errors import TaggingFatal, TaggingThrottled, TaggingUnavailable
 from pirate_radio.tagging.clients import (
+    AcoustIdClient,
     FpcalcFingerprinter,
     RateLimiter,
+    acoustid_key,
+    build_acoustid_params,
     build_fpcalc_argv,
+    parse_acoustid_response,
     parse_fpcalc_json,
+    request_json,
 )
-from pirate_radio.tagging.models import Fingerprint
+from pirate_radio.tagging.models import AcoustIdMatch, Fingerprint
 
 
 class _FakeClock:
@@ -125,3 +130,100 @@ def test_fingerprint_nonzero_exit_is_fatal() -> None:
     )
     with pytest.raises(TaggingFatal):
         eng.fingerprint(Path("/lib/x/bad.flac"))
+
+
+# ---- request_json: shared retry-with-rearm (P5-4) -----------------------------------------
+class _SpyLimiter:
+    def __init__(self) -> None:
+        self.acquired = 0
+        self.throttles: list[float | None] = []
+
+    def acquire(self) -> None:
+        self.acquired += 1
+
+    def note_throttle(self, retry_after_seconds: float | None) -> None:
+        self.throttles.append(retry_after_seconds)
+
+
+def test_request_json_retries_on_throttle_then_succeeds() -> None:
+    lim = _SpyLimiter()
+    calls = iter([TaggingThrottled("429", retry_after_seconds=2.0), TaggingThrottled("503"), None])
+
+    def _get(**kw: object) -> dict[str, object]:
+        exc = next(calls)
+        if exc is not None:
+            raise exc
+        return {"status": "ok"}
+
+    out = request_json(_get, lim, url="u")
+    assert out == {"status": "ok"}
+    assert lim.acquired == 3 and lim.throttles == [2.0, None]  # re-armed each throttle
+
+
+def test_request_json_gives_up_after_max_retries() -> None:
+    lim = _SpyLimiter()
+
+    def _get(**kw: object) -> dict[str, object]:
+        raise TaggingThrottled("429")
+
+    with pytest.raises(TaggingUnavailable):
+        request_json(_get, lim, url="u", max_retries=3)
+    assert lim.acquired == 3
+
+
+# ---- AcoustID key (H22) + params + parse --------------------------------------------------
+def test_acoustid_key_reads_env_by_name(monkeypatch) -> None:
+    monkeypatch.setenv("MY_ACOUSTID_KEY", "the-secret")
+    assert acoustid_key("MY_ACOUSTID_KEY") == "the-secret"
+
+
+def test_acoustid_key_unset_is_fatal_naming_var_not_value(monkeypatch) -> None:
+    monkeypatch.delenv("MY_ACOUSTID_KEY", raising=False)
+    with pytest.raises(TaggingFatal) as exc:
+        acoustid_key("MY_ACOUSTID_KEY")
+    assert "MY_ACOUSTID_KEY" in str(
+        exc.value
+    )  # names the var (H22: never the value, which is unset)
+
+
+def test_build_acoustid_params_carries_key_duration_fingerprint() -> None:
+    params = build_acoustid_params("KEY", Fingerprint(duration=212.0, fingerprint="FP"))
+    assert params["client"] == "KEY" and params["fingerprint"] == "FP"
+    assert params["duration"] == 212  # integer seconds for the API
+
+
+def test_parse_acoustid_extracts_recording_matches_sorted_by_score() -> None:
+    data = {
+        "status": "ok",
+        "results": [
+            {"score": 0.7, "recordings": [{"id": "rec-low"}]},
+            {"score": 0.95, "recordings": [{"id": "rec-hi"}, {"id": "rec-hi2"}]},
+        ],
+    }
+    matches = parse_acoustid_response(data)
+    assert matches[0] == AcoustIdMatch(recording_id="rec-hi", score=0.95)  # highest first
+    assert AcoustIdMatch(recording_id="rec-low", score=0.7) in matches
+
+
+def test_parse_acoustid_empty_results_is_empty() -> None:
+    assert parse_acoustid_response({"status": "ok", "results": []}) == ()
+
+
+def test_parse_acoustid_non_ok_status_is_fatal() -> None:
+    with pytest.raises(TaggingFatal):
+        parse_acoustid_response({"status": "error", "error": {"message": "bad client"}})
+
+
+def test_acoustid_client_lookup_threads_key_through_get(monkeypatch) -> None:
+    monkeypatch.setenv("AID_KEY", "the-secret")
+    seen: dict[str, object] = {}
+
+    def _get(**kw: object) -> dict[str, object]:
+        seen.update(kw)
+        return {"status": "ok", "results": [{"score": 0.9, "recordings": [{"id": "mbid"}]}]}
+
+    lim = RateLimiter(0.34, clock=_FakeClock(), sleep=lambda s: None)
+    client = AcoustIdClient("AID_KEY", limiter=lim, get_json=_get)
+    matches = client.lookup(Fingerprint(duration=100.0, fingerprint="FP"))
+    assert matches == (AcoustIdMatch(recording_id="mbid", score=0.9),)
+    assert seen["params"]["client"] == "the-secret"  # key reached the seam (only there)

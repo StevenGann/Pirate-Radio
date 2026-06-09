@@ -225,7 +225,8 @@ Coordinator (shared services + §A C1 look-ahead budget), two-tier supervision (
 - **P5-1 ✅** `tagging/models.py` (frozen `Fingerprint`/`AcoustIdMatch`/`RecordingMetadata`/`TagPlan` with `is_noop`+`changes()`) + `TaggingError` taxonomy in errors.py (`TaggingUnavailable`/`TaggingThrottled`[retry_after]/`TaggingFatal`) — `0047`. Gate: 720 tests, 97.50%, clean.
 - **P5-2 ✅** `tagging/selection.py` PURE `best_match` (highest score, lowest-MBID tie-break, order-independent, floor) + `merge_tags` (fill-not-overwrite, never-erase/blank/churn, force) + `choose_best` (authoritative gate: below-floor→no-op) — `0048`. Focused panel on tests: 2 NAY → revised (choose_best gate; force+fill matrix; per-field never-erase; blank-candidate; determinism). `_MIN_ACOUSTID_SCORE=0.85`. Gate: 745 tests, 97.69%.
 - **P5-3 ✅** `tagging/clients.py` `RateLimiter` (deficit math vs injected clock; first-no-sleep/back-to-back/spaced-zero/throttle-rearm) + `build_fpcalc_argv`/`parse_fpcalc_json` (PURE, -length 120) + `FpcalcFingerprinter` (injectable runner; only subprocess.run hardware) — `0049`. Gate: 756 tests, 97.67%.
-- **RESUME POINT: build P5-4** (AcoustID sync GET client; H22 client= scrub) … P5-9 deep-dive.
+- **P5-4 ✅** AcoustID client + `request_json` (shared rate-limited retry-rearm) + `acoustid_key` (H22 by-name) + PURE params/parse (sorted matches, non-ok→Fatal) + `scrub_secrets` `client=`/`token=` URL-param fix — `0050`. Gate: 767 tests, 97.61%.
+- **RESUME POINT: build P5-5** (MusicBrainz client: ≤1 req/s, required UA, fmt=json) … P5-9 deep-dive.
 ### Phase 6 — Control API (FastAPI, in v1 per D4)  — NOT STARTED
 
 ### Final — deep-dive code-quality + documentation review  — ✅ COMPLETE (all 7 validated)

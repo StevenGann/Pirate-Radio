@@ -218,6 +218,8 @@ async def test_inprocess_escalation_does_not_cancel_sibling_tasks() -> None:
         "header xi-api-key: SUPERSECRET denied",
         'body {"api_key": "SUPERSECRET"}',
         "raw token sk-SUPERSECRET-abc not authorized",
+        "GET https://api.acoustid.org/v2/lookup?client=SUPERSECRET&d=1 failed",  # P5-4 client=
+        "url …?token=SUPERSECRET&x=1 rejected",
     ],
 )
 def test_scrub_secrets_redacts_known_shapes(leak: str) -> None:

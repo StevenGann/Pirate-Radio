@@ -47,6 +47,8 @@ _SCRUB_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         r"\1<redacted>",
     ),
     (re.compile(r"\bsk-\S+"), "<redacted>"),  # bare sk-... tokens (Anthropic/OpenAI shape)
+    # API keys carried as a URL query param (AcoustID `?client=<key>`, generic `?token=`) — P5-4.
+    (re.compile(r"((?:client|token)=)[^&\s]+", re.IGNORECASE), r"\1<redacted>"),
 ]
 
 
