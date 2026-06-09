@@ -10,22 +10,27 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
 from pirate_radio.errors import (
+    ConfigError,
     TaggingFatal,
     TaggingThrottled,
     TaggingUnavailable,
 )
-from pirate_radio.tagging.models import AcoustIdMatch, Fingerprint
+from pirate_radio.tagging.models import AcoustIdMatch, Fingerprint, RecordingMetadata
 
 _FPCALC_LENGTH_SECONDS = 120  # fingerprint only the first 120 s — bounds per-file CPU (RPi)
 _ACOUSTID_URL = "https://api.acoustid.org/v2/lookup"
 _ACOUSTID_INTERVAL_SECONDS = 0.34  # AcoustID ≈3 req/s per key
+_MUSICBRAINZ_URL = "https://musicbrainz.org/ws/2"
+_MUSICBRAINZ_INTERVAL_SECONDS = 1.0  # MusicBrainz policy: ≤1 req/s per IP
 _DEFAULT_MAX_RETRIES = 3
+_YEAR_RE = re.compile(r"\b(\d{4})\b")
 
 # the injected sync GET seam: (url, *, params, headers) -> parsed JSON dict (raises TaggingError)
 GetJson = Callable[..., dict[str, object]]
@@ -219,3 +224,68 @@ def _default_get_json(  # pragma: no cover (R20/R21: the only network line; test
     if resp.status_code >= 400:
         raise TaggingFatal(f"{resp.status_code} from {url}")
     return cast("dict[str, object]", resp.json())
+
+
+def build_musicbrainz_url(mbid: str, *, base_url: str = _MUSICBRAINZ_URL) -> str:
+    """PURE: the MusicBrainz recording lookup URL — JSON, with artist + release sub-queries."""
+    return f"{base_url.rstrip('/')}/recording/{mbid}?fmt=json&inc=artists+releases"
+
+
+def _parse_year(date_str: object) -> int | None:
+    """PURE: a leading 4-digit year from an MB date (``YYYY`` / ``YYYY-MM-DD``), bounded 1..9999."""
+    if not isinstance(date_str, str):
+        return None
+    m = _YEAR_RE.search(date_str)
+    if not m:
+        return None
+    year = int(m.group(1))
+    return year if 1 <= year <= 9999 else None
+
+
+def parse_recording(data: dict[str, object]) -> RecordingMetadata:
+    """PURE: an MB recording JSON -> ``RecordingMetadata``. Artist is the joined artist-credit;
+    album + year come from the first release. Every field is best-effort (sparse is fine)."""
+    title = data.get("title")
+    credit = cast("list[dict[str, Any]]", data.get("artist-credit", []))
+    artist = "".join(c.get("name", "") + c.get("joinphrase", "") for c in credit).strip() or None
+    releases = cast("list[dict[str, Any]]", data.get("releases", []))
+    album = year = None
+    if releases:
+        album = releases[0].get("title")
+        year = _parse_year(releases[0].get("date"))
+    return RecordingMetadata(
+        title=title if isinstance(title, str) else None,
+        artist=artist,
+        album=album if isinstance(album, str) else None,
+        year=year,
+    )
+
+
+class MusicBrainzClient:
+    """MusicBrainz recording lookup over the injected sync GET seam, rate-limited to ≤1 req/s with a
+    REQUIRED descriptive User-Agent (MB policy — missing → ``ConfigError`` at construction)."""
+
+    def __init__(
+        self,
+        user_agent: str,
+        *,
+        limiter: RateLimiter,
+        get_json: GetJson | None = None,
+        base_url: str = _MUSICBRAINZ_URL,
+    ) -> None:
+        if not user_agent.strip():
+            raise ConfigError(
+                "MusicBrainz requires a descriptive User-Agent with contact info "
+                "(e.g. 'PiRate/1.0 ( you@example.com )')"
+            )
+        self._ua = user_agent
+        self._limiter = limiter
+        self._get_json = get_json or _default_get_json
+        self._base_url = base_url
+
+    def recording(self, mbid: str) -> RecordingMetadata:
+        url = build_musicbrainz_url(mbid, base_url=self._base_url)
+        data = request_json(
+            self._get_json, self._limiter, url=url, headers={"User-Agent": self._ua}
+        )
+        return parse_recording(data)

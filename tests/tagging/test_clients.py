@@ -25,7 +25,7 @@ from pirate_radio.tagging.clients import (
     parse_fpcalc_json,
     request_json,
 )
-from pirate_radio.tagging.models import AcoustIdMatch, Fingerprint
+from pirate_radio.tagging.models import AcoustIdMatch, Fingerprint, RecordingMetadata
 
 
 class _FakeClock:
@@ -227,3 +227,74 @@ def test_acoustid_client_lookup_threads_key_through_get(monkeypatch) -> None:
     matches = client.lookup(Fingerprint(duration=100.0, fingerprint="FP"))
     assert matches == (AcoustIdMatch(recording_id="mbid", score=0.9),)
     assert seen["params"]["client"] == "the-secret"  # key reached the seam (only there)
+
+
+# ---- MusicBrainz: ≤1 req/s, required UA, fmt=json recording parse (P5-5) -------------------
+def test_musicbrainz_requires_a_user_agent() -> None:
+    from pirate_radio.errors import ConfigError
+    from pirate_radio.tagging.clients import MusicBrainzClient
+
+    lim = RateLimiter(1.0, clock=_FakeClock(), sleep=lambda s: None)
+    with pytest.raises(ConfigError):
+        MusicBrainzClient("", limiter=lim)  # MB policy: a descriptive UA (with contact) is required
+
+
+def test_build_musicbrainz_url_is_json_with_artists_and_releases() -> None:
+    from pirate_radio.tagging.clients import build_musicbrainz_url
+
+    url = build_musicbrainz_url("mbid-123", base_url="https://mb/ws/2")
+    assert "recording/mbid-123" in url and "fmt=json" in url and "inc=artists+releases" in url
+
+
+def test_parse_recording_extracts_title_artist_album_year() -> None:
+    from pirate_radio.tagging.clients import parse_recording
+
+    data = {
+        "title": "Song",
+        "artist-credit": [{"name": "Band", "joinphrase": ""}],
+        "releases": [{"title": "The Album", "date": "1984-03-01"}],
+    }
+    rec = parse_recording(data)
+    assert rec == RecordingMetadata(title="Song", artist="Band", album="The Album", year=1984)
+
+
+def test_parse_recording_joins_multi_artist_credit() -> None:
+    from pirate_radio.tagging.clients import parse_recording
+
+    data = {
+        "title": "Duet",
+        "artist-credit": [
+            {"name": "A", "joinphrase": " feat. "},
+            {"name": "B", "joinphrase": ""},
+        ],
+    }
+    assert parse_recording(data).artist == "A feat. B"
+
+
+def test_parse_recording_tolerates_sparse_and_bad_year() -> None:
+    from pirate_radio.tagging.clients import parse_recording
+
+    rec = parse_recording({"title": "Only Title"})  # no artist-credit / releases
+    assert rec == RecordingMetadata(title="Only Title")
+    # an unparseable / out-of-range date year is dropped, not an error
+    no_year = parse_recording({"title": "T", "releases": [{"title": "Al", "date": "????"}]})
+    assert no_year.album == "Al" and no_year.year is None
+
+
+def test_musicbrainz_recording_sends_ua_and_is_rate_limited() -> None:
+    from pirate_radio.tagging.clients import MusicBrainzClient
+
+    seen: dict[str, object] = {}
+    slept: list[float] = []
+
+    def _get(**kw: object) -> dict[str, object]:
+        seen.update(kw)
+        return {"title": "Song", "artist-credit": [{"name": "Band", "joinphrase": ""}]}
+
+    clock = _FakeClock()
+    lim = RateLimiter(1.0, clock=clock, sleep=slept.append)
+    client = MusicBrainzClient("PiRate/1.0 ( me@example.com )", limiter=lim, get_json=_get)
+    client.recording("mbid-1")  # first call: no wait
+    client.recording("mbid-2")  # back-to-back -> the ≤1 req/s limiter sleeps 1.0s
+    assert seen["headers"]["User-Agent"] == "PiRate/1.0 ( me@example.com )"
+    assert slept == [pytest.approx(1.0)]
