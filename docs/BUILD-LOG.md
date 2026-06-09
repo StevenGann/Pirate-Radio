@@ -227,7 +227,8 @@ Coordinator (shared services + §A C1 look-ahead budget), two-tier supervision (
 - **P5-3 ✅** `tagging/clients.py` `RateLimiter` (deficit math vs injected clock; first-no-sleep/back-to-back/spaced-zero/throttle-rearm) + `build_fpcalc_argv`/`parse_fpcalc_json` (PURE, -length 120) + `FpcalcFingerprinter` (injectable runner; only subprocess.run hardware) — `0049`. Gate: 756 tests, 97.67%.
 - **P5-4 ✅** AcoustID client + `request_json` (shared rate-limited retry-rearm) + `acoustid_key` (H22 by-name) + PURE params/parse (sorted matches, non-ok→Fatal) + `scrub_secrets` `client=`/`token=` URL-param fix — `0050`. Gate: 767 tests, 97.61%.
 - **P5-5 ✅** `MusicBrainzClient` (≤1 req/s limiter, **required User-Agent**→ConfigError, fmt=json) + PURE `build_musicbrainz_url`/`parse_recording` (joined artist-credit, first-release album+year, `_parse_year` bounded) over the shared request_json seam — `0051`. Gate: 773 tests, 97.58%.
-- **RESUME POINT: build P5-6** (atomic tag write: temp+same-dir+fsync+rename; CI mutagen round-trip) … P5-9 deep-dive.
+- **P5-6 ✅** `tagging/tag_writer.py` atomic `apply_tag_plan` (same-dir temp + fsync + os.replace; mid-write failure leaves original intact; dry-run/no-op write nothing) + `_mutagen_write` easy-key mapping (year→date) — `0052`. CI-tests all our logic (atomic orchestration via injected seam + mapping via mutagen mock); only the real-container open is hardware. Gate: 779 tests, 97.56%.
+- **RESUME POINT: build P5-7** (tagger.py orchestration: walk/skip/fingerprint/acoustid/mb/choose/write; isolation; limit; nice) … P5-9 deep-dive.
 ### Phase 6 — Control API (FastAPI, in v1 per D4)  — NOT STARTED
 
 ### Final — deep-dive code-quality + documentation review  — ✅ COMPLETE (all 7 validated)
