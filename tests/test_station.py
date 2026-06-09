@@ -52,8 +52,13 @@ def _config(tmp_path: Path) -> StationConfig:
     )
 
 
+async def _inline_offload(fn, *a, **k):  # noqa: ANN001, ANN002, ANN003 - run the load on the loop
+    return fn(*a, **k)  # deterministic in tests; prod uses asyncio.to_thread (R23, off the loop)
+
+
 def _station(tmp_path: Path, **over) -> Station:
     kw: dict = {
+        "offload": _inline_offload,
         "config": _config(tmp_path),
         "clock": FixedClock(datetime(2026, 6, 10, 9, 30, tzinfo=ZoneInfo("America/New_York"))),
         "sink": FakeAudioSink(),
@@ -228,6 +233,32 @@ async def test_run_releases_the_regen_lock_before_play_day(tmp_path, monkeypatch
     task = asyncio.create_task(st.run())
     await asyncio.wait_for(played.wait(), 2.0)
     assert locked_during_play == [False]  # lock released after the load, before airtime
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+
+async def test_run_offloads_the_daily_load_off_the_event_loop(tmp_path, monkeypatch) -> None:
+    # arch-cycle DA CRITICAL: the daily load/generate (a full-day generate + fsync-heavy write on
+    # the cold-start/restart/corrupt path) must run OFF the loop, like the midnight roll, so a
+    # reslice can't stall every other station's sink. Assert the load ran via the injected offload.
+    offloaded: list = []
+    played = asyncio.Event()
+
+    async def _offload(fn, *a, **k):
+        offloaded.append(fn)
+        return fn(*a, **k)  # run inline in the test (real to_thread in prod)
+
+    async def _fake_play_day(**kw):
+        played.set()
+
+    monkeypatch.setattr("pirate_radio.station.play_day", _fake_play_day)
+    monkeypatch.setattr("pirate_radio.station.load_with_recovery", lambda *a, **k: _schedule())
+
+    st = _station(tmp_path, offload=_offload)
+    task = asyncio.create_task(st.run())
+    await asyncio.wait_for(played.wait(), 2.0)
+    assert offloaded and offloaded[0] == st._load_or_generate  # the load ran via the offload seam
     task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await task

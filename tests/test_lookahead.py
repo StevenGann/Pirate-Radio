@@ -21,10 +21,10 @@ from pirate_radio.catalog.models import Track
 from pirate_radio.errors import ConfigError
 from pirate_radio.lookahead import (
     _LLM_TIMEOUT_DEFAULT,
-    _LOOKAHEAD_RAM_BUDGET_BYTES,
     _RESIDENT_SLACK_SLOTS,
     _STAGGER_STEP_SECONDS,
     _TTS_TIMEOUT_DEFAULT,
+    LOOKAHEAD_RAM_BUDGET_BYTES,
     lookahead_depth,
     ram_affordable_depth,
     resolve_lookahead_depth,
@@ -265,7 +265,7 @@ def test_worst_case_patter_render_empty_chains_is_zero() -> None:
 
 def test_named_constants_are_the_documented_fixed_values() -> None:
     # Old-Man/RPi condition: a FIXED budget (not a psutil fraction), reproducible at 3am.
-    assert _LOOKAHEAD_RAM_BUDGET_BYTES == 1_600_000_000  # ~1.6 GB ≈ 40% of a 4 GB Pi
+    assert LOOKAHEAD_RAM_BUDGET_BYTES == 1_600_000_000  # ~1.6 GB ≈ 40% of a 4 GB Pi
     assert _STAGGER_STEP_SECONDS == 2.0
     assert _LLM_TIMEOUT_DEFAULT == 20.0
     assert _TTS_TIMEOUT_DEFAULT == 30.0

@@ -8,7 +8,7 @@ quantities once at boot from the resolved config + each station's schedule:
 - **depth** — ``worst_consecutive_patter + 1`` (the cluster + the one masking-track slot); passed to
   ``run_once(maxsize=depth)``.
 - **RAM ceiling** — a **FAIL-FAST** ``ConfigError`` (NOT a silent clamp; a clamp would re-introduce
-  C1) against a **FIXED** byte budget (``_LOOKAHEAD_RAM_BUDGET_BYTES`` — sized for the 4 GB /
+  C1) against a **FIXED** byte budget (``LOOKAHEAD_RAM_BUDGET_BYTES`` — sized for the 4 GB /
   4-station target, NOT a ``psutil`` fraction that varies per boot and is unreproducible at 3am).
 - **stagger** — a deterministic per-station initial render delay (no RNG) so N stations don't fire
   Piper/cloud renders on the same tick (the 4-core thundering herd, synchronized top-of-hour IDs).
@@ -33,7 +33,7 @@ _BYTES_PER_FLOAT32 = 4  # AudioBuffer is float32 (~11.5 MB/min mono @ 48 kHz)
 # 4 GB / 4-station deployment target. Deliberately a constant (NOT a psutil-derived fraction of
 # free RAM): the boot result must be byte-identical across reboots so a config that fails fast at
 # 3am fails the same way every time (Rev-2 amendment; DA + Senior + Old Man). No psutil dependency.
-_LOOKAHEAD_RAM_BUDGET_BYTES = 1_600_000_000
+LOOKAHEAD_RAM_BUDGET_BYTES = 1_600_000_000
 
 # Per-station render-stagger step (H-RPi-3): station i waits ``i * step`` before its first render.
 _STAGGER_STEP_SECONDS = 2.0
@@ -88,7 +88,7 @@ def ram_affordable_depth(
     *,
     worst_track_seconds: float,
     n_stations: int,
-    ram_budget_bytes: int = _LOOKAHEAD_RAM_BUDGET_BYTES,
+    ram_budget_bytes: int = LOOKAHEAD_RAM_BUDGET_BYTES,
     sample_rate: int = DEFAULT_SAMPLE_RATE,
     channels: int = 1,
 ) -> int:
@@ -108,7 +108,7 @@ def resolve_lookahead_depth(
     needed_depth: int,
     worst_track_seconds: float,
     n_stations: int,
-    ram_budget_bytes: int = _LOOKAHEAD_RAM_BUDGET_BYTES,
+    ram_budget_bytes: int = LOOKAHEAD_RAM_BUDGET_BYTES,
     sample_rate: int = DEFAULT_SAMPLE_RATE,
     channels: int = 1,
     resident_slack: int = _RESIDENT_SLACK_SLOTS,

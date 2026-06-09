@@ -16,8 +16,10 @@ import argparse
 import asyncio
 import contextlib
 import logging
+import os
 import signal
 from collections.abc import Callable, Coroutine
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -80,6 +82,13 @@ def main(argv: list[str], *, deps: MainDeps) -> int:
     return 0
 
 
+def _offload_pool_size() -> int:
+    """Worker count for the offload thread pool — the CPU core count (min 2). One render thread per
+    core matches the serial-per-station producer (≈ N concurrent renders for N stations on N cores);
+    more would just thrash the Pi's cores (arch-cycle RPi)."""
+    return max(2, os.cpu_count() or 4)
+
+
 async def _run_daemon(
     coordinator: Coordinator, *, api_coro: Coroutine[Any, Any, None] | None
 ) -> None:
@@ -89,12 +98,22 @@ async def _run_daemon(
     the runner is cancelled so every ``async with self._sink`` in ``Station.run`` unwinds through
     ``__aexit__`` and the audio device is closed cleanly, instead of Python's default
     hard-terminate-on-SIGTERM that abandons the open PortAudio stream (final-review DA HIGH)."""
+    loop = asyncio.get_running_loop()
+    # Bound the offload thread pool that backs every `asyncio.to_thread` (decode, loudness, TTS,
+    # the daily/midnight schedule writes). The stdlib default is min(32, cpu+4) — far more than a
+    # 4-core Pi has — so the architecture would lean on an emergent "≤cores concurrent renders"
+    # bound it never enforces; size it explicitly to the core count (arch-cycle RPi/DA). The
+    # per-sink write executors are separate (sink.py), so playback is never starved by this pool.
+    offload_pool = ThreadPoolExecutor(
+        max_workers=_offload_pool_size(), thread_name_prefix="pirate-offload"
+    )
+    loop.set_default_executor(offload_pool)
+
     if api_coro is None:
         runner: asyncio.Future[Any] = asyncio.ensure_future(coordinator.run())
     else:
         runner = asyncio.gather(coordinator.run(), _isolated(api_coro, name="control-api"))
 
-    loop = asyncio.get_running_loop()
     installed: list[signal.Signals] = []
     for sig in (signal.SIGTERM, signal.SIGINT):
         try:
@@ -115,6 +134,7 @@ async def _run_daemon(
         for sig in installed:
             with contextlib.suppress(NotImplementedError, RuntimeError, ValueError):
                 loop.remove_signal_handler(sig)
+        offload_pool.shutdown(wait=False)
 
 
 async def _isolated(coro: Coroutine[Any, Any, None], *, name: str) -> None:

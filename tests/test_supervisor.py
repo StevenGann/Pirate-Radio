@@ -15,7 +15,8 @@ import logging
 import pytest
 
 from pirate_radio.pipeline.timing import VirtualSleeper
-from pirate_radio.supervisor import Supervisable, Supervisor, scrub_secrets
+from pirate_radio.scrub import scrub_secrets
+from pirate_radio.supervisor import Supervisable, Supervisor
 
 
 class _Unit:

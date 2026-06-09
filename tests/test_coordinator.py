@@ -224,6 +224,46 @@ async def _noop() -> None:
     return None
 
 
+async def test_run_drives_the_real_supervisor_over_real_stations(tmp_path, monkeypatch) -> None:
+    # arch-cycle QA: exercise the ASSEMBLED whole — the real Supervisor running the real Stations
+    # (producer -> player -> sink) concurrently under coord.run(), not the all-loops-no-op'd wiring
+    # test. Only the peripheral midnight + summary loops are stubbed; the supervisor + stations run
+    # for real, proving the supervisor->station->producer->player->sink path works end to end.
+    import asyncio
+    import contextlib
+
+    sinks: list[FakeAudioSink] = []
+
+    def _factory(_port_id: PortId) -> FakeAudioSink:
+        sink = FakeAudioSink()
+        sinks.append(sink)
+        return sink
+
+    coord = _coord(tmp_path, sink_factory=_factory)
+    monkeypatch.setattr(coord, "_summary_loop", lambda: _noop())
+    monkeypatch.setattr(coord._midnight, "run", lambda: _noop())
+    task = asyncio.create_task(coord.run())
+
+    async def _both_on_air() -> None:
+        # both stations reaching ON_AIR proves the real supervisor started the real stations and
+        # each ran load(via offload)->anchor->on-air concurrently under coord.run() (assembled)
+        def _all_on_air() -> bool:
+            states = [s.state.name for s in coord.registry.values()]
+            return len(states) >= 2 and set(states) == {"ON_AIR"}
+
+        while not _all_on_air():
+            await asyncio.sleep(0.01)  # yield real time so the station tasks make progress
+
+    try:
+        await asyncio.wait_for(_both_on_air(), 5.0)
+        assert {s.state.name for s in coord.registry.values()} == {"ON_AIR"}
+        assert all(s.entered for s in sinks)  # each station opened its sink (async with __aenter__)
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
 # ---- control actions (P6-3) ---------------------------------------------------------------
 def test_skip_sets_the_stations_skip_event(tmp_path) -> None:
     coord = _coord(tmp_path)

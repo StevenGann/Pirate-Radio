@@ -143,6 +143,17 @@ async def test_run_daemon_api_crash_does_not_stop_the_broadcast() -> None:
     assert ran == ["started", "finished"]  # the broadcast ran to completion despite the API crash
 
 
+def test_offload_pool_size_is_core_bounded() -> None:
+    # arch-cycle RPi/DA: the offload pool is sized to the core count (min 2), NOT the stdlib
+    # min(32, cpu+4) default, so N stations' renders can't thrash a 4-core Pi.
+    import os
+
+    from pirate_radio.__main__ import _offload_pool_size
+
+    assert _offload_pool_size() == max(2, os.cpu_count() or 4)
+    assert _offload_pool_size() >= 2
+
+
 async def test_run_daemon_drains_the_broadcast_on_shutdown() -> None:
     # P6-final / DA HIGH: on shutdown the runner is cancelled and the cancellation must reach
     # coordinator.run() so each station's `async with self._sink` unwinds through __aexit__ (the

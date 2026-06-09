@@ -61,7 +61,11 @@ addopts = [
     "--cov-report=term-missing",
     "--cov-report=xml",
     "--cov-fail-under=80",
-    "--allow-unix-socket",  # @pytest.mark.disable_socket tests still need asyncio's AF_UNIX self-pipe
+    # R21 as a SUITE-WIDE invariant (arch-cycle QA): block every real socket on the CI path, not
+    # just in one file. --allow-unix-socket keeps asyncio's AF_UNIX self-pipe + the in-process
+    # ASGI TestClient working; the @pytest.mark.network smokes re-enable real sockets explicitly.
+    "--disable-socket",
+    "--allow-unix-socket",
 ]
 markers = [
     "hardware: tests that require real Raspberry Pi hardware (skipped in CI)",

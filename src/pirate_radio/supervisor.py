@@ -20,10 +20,10 @@ from collections.abc import Callable, Sequence
 from typing import Protocol, runtime_checkable
 
 from pirate_radio.pipeline.timing import Sleeper
-from pirate_radio.scrub import scrub_secrets  # re-exported for back-compat; now a leaf utility
+from pirate_radio.scrub import scrub_secrets  # canonical home is pirate_radio.scrub
 from pirate_radio.status import StationState, StationStatus
 
-__all__ = ["Supervisor", "Supervisable", "scrub_secrets"]
+__all__ = ["Supervisable", "Supervisor"]
 
 logger = logging.getLogger(__name__)
 

@@ -15,7 +15,9 @@ import pytest
 from pirate_radio.dj.context import BlockContext, DjContext
 from pirate_radio.dj.text import ClaudeDJ, DeepSeekDJ, OllamaDJ
 
-pytestmark = pytest.mark.network
+# network + enable_socket: these are the only tests permitted a real socket (run with -m network);
+# the suite-wide --disable-socket otherwise blocks all real sockets (R21).
+pytestmark = [pytest.mark.network, pytest.mark.enable_socket]
 
 
 def _ctx() -> DjContext:

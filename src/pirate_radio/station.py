@@ -14,9 +14,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import date
 from pathlib import Path
+from typing import cast
 
 from pirate_radio.audio.buffer import DEFAULT_SAMPLE_RATE, AudioBuffer
 from pirate_radio.audio.decode import Decoder
@@ -60,6 +61,7 @@ class Station:
         day_roll: asyncio.Event,
         refill_budget_seconds: float,
         skip: asyncio.Event | None = None,
+        offload: Callable[..., Awaitable[object]] = asyncio.to_thread,
         sample_rate: int = DEFAULT_SAMPLE_RATE,
         channels: int = 1,
         maxsize: int = _DEFAULT_MAXSIZE,
@@ -81,6 +83,10 @@ class Station:
         self._state_dir = state_dir
         self._day_roll = day_roll
         self._skip = skip if skip is not None else asyncio.Event()  # control-API skip (P6-3)
+        # Run the (potentially generate+fsync-heavy) daily load OFF the event loop, exactly as the
+        # midnight roll / API regenerate do — otherwise a cold-start/restart reslice blocks the
+        # shared loop and stalls EVERY station's sink (arch-cycle DA CRITICAL / R23).
+        self._offload = offload
         # serializes schedule regeneration (midnight roll + an API --regenerate) for THIS station
         # so two writers never race the same file's .bak rotation (P6-3 / DA).
         self._regen_lock = asyncio.Lock()
@@ -167,7 +173,7 @@ class Station:
                 # concurrent regenerate write (midnight roll / API regenerate) on the same file —
                 # correctness no longer rides solely on os.replace atomicity (CF 0063 / DA).
                 async with self._regen_lock:
-                    schedule = self._load_or_generate(day)
+                    schedule = cast(DailySchedule, await self._offload(self._load_or_generate, day))
                 anchored = anchor(
                     schedule, transition_silence=self._config.transition_silence_seconds
                 )

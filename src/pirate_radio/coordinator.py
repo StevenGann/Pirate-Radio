@@ -48,7 +48,7 @@ from pirate_radio.dj.failover import RankedTextGenerator
 from pirate_radio.dj.protocols import AudioSink
 from pirate_radio.errors import ConfigError
 from pirate_radio.lookahead import (
-    _LOOKAHEAD_RAM_BUDGET_BYTES,
+    LOOKAHEAD_RAM_BUDGET_BYTES,
     lookahead_depth,
     resolve_lookahead_depth,
     stagger_offset,
@@ -106,7 +106,7 @@ class Coordinator:
         grid_loader: Callable[[StationConfig, date], Grid] | None = None,
         decoder_factory: Callable[[], Decoder] | None = None,
         summary_period_seconds: float = _SUMMARY_PERIOD_SECONDS,
-        ram_budget_bytes: int = _LOOKAHEAD_RAM_BUDGET_BYTES,
+        ram_budget_bytes: int = LOOKAHEAD_RAM_BUDGET_BYTES,
         offload: Callable[..., Awaitable[object]] = asyncio.to_thread,
     ) -> None:
         self._config = config
@@ -293,6 +293,7 @@ class Coordinator:
                     state_dir=self._config.state_dir,
                     day_roll=asyncio.Event(),
                     refill_budget_seconds=worst_case_render,
+                    offload=self._offload,  # daily reslice load runs off the loop (R23)
                     sample_rate=DEFAULT_SAMPLE_RATE,
                     channels=1,
                     maxsize=self.depth,
