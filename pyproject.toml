@@ -61,6 +61,7 @@ addopts = [
     "--cov-report=term-missing",
     "--cov-report=xml",
     "--cov-fail-under=80",
+    "--allow-unix-socket",  # @pytest.mark.disable_socket tests still need asyncio's AF_UNIX self-pipe
 ]
 markers = [
     "hardware: tests that require real Raspberry Pi hardware (skipped in CI)",
