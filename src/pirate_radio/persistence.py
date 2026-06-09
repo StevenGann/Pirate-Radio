@@ -25,6 +25,7 @@ from typing import TypeVar
 
 from pydantic import BaseModel, ValidationError
 
+from pirate_radio.durability import atomic_replace
 from pirate_radio.errors import StateCorruptionError
 
 M = TypeVar("M", bound=BaseModel)
@@ -60,8 +61,7 @@ def atomic_write_json(path: Path, model: BaseModel, *, schema_version: int) -> N
             fh.write(data)
             fh.flush()
             os.fsync(fh.fileno())
-        os.replace(tmp, path)  # atomic rename
-        _fsync_dir(path.parent)  # make the rename itself durable (R5)
+        atomic_replace(tmp, path, strict=True)  # atomic rename + durable dir-fsync (R5; A7 strict)
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
@@ -114,17 +114,7 @@ def _replace_keep_bak(path: Path) -> None:
             fh.write(data)
             fh.flush()
             os.fsync(fh.fileno())
-        os.replace(tmp, bak)
-        _fsync_dir(path.parent)
+        atomic_replace(tmp, bak, strict=True)
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
-
-
-def _fsync_dir(directory: Path) -> None:
-    """fsync a directory so a rename within it is durable (R5)."""
-    dir_fd = os.open(directory, os.O_RDONLY)
-    try:
-        os.fsync(dir_fd)
-    finally:
-        os.close(dir_fd)

@@ -138,32 +138,11 @@ def test_udev_ambiguous_name_resolves_to_none() -> None:
         ]
     )
     assert r.resolve("dup") is None
-    assert r.device_index("dup") is None
 
 
 def test_udev_empty_enumeration_resolves_to_none() -> None:
     # §H: the daemon must tolerate boot-before-device-present — empty enumeration -> None, no crash
     assert _udev([]).resolve("pirate1") is None
-
-
-def test_udev_resolve_and_index_agree_on_existence() -> None:
-    # DA: resolve(name) is None IFF device_index(name) is None — the sink must never get a PortId
-    # it can't open (or an index for a name that didn't resolve).
-    r = _udev([AudioDevice(name="pirate1", port_path="usb-1.2", index=3)])
-    for name in ("pirate1", "missing", "dup"):
-        assert (r.resolve(name) is None) == (r.device_index(name) is None)
-
-
-def test_udev_device_index_bridges_to_portaudio() -> None:
-    # the sink needs the PortAudio device index; the resolver bridges name -> ALSA -> PA index
-    r = _udev(
-        [
-            AudioDevice(name="pirate1", port_path="usb-1.2", index=3),
-            AudioDevice(name="pirate2", port_path="usb-1.3", index=7),
-        ]
-    )
-    assert r.device_index("pirate2") == 7
-    assert r.device_index("nope") is None
 
 
 def test_udev_device_index_for_port_translates_the_stable_portid() -> None:

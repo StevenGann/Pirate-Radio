@@ -83,12 +83,6 @@ class UdevAudioDeviceResolver:
         device = self._unique(name)
         return PortId(device.port_path) if device is not None else None
 
-    def device_index(self, name: str) -> int | None:
-        """The PortAudio device index for ``name`` (for the sink). None exactly when ``resolve``
-        is None, so the sink never gets an index for a name that didn't resolve (and vice versa)."""
-        device = self._unique(name)
-        return device.index if device is not None else None
-
     def device_index_for_port(self, port_id: PortId) -> int | None:
         """The PortAudio **device index** for a resolved ``PortId`` (port path). The sink opens by
         index, NOT by the sysfs port path — the prod ``sink_factory`` receives the stable ``PortId``

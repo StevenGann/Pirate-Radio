@@ -27,8 +27,7 @@ Secrets are **never** in this file — credentials are referenced by environment
 | Field | Required | Default | Notes |
 |---|---|---|---|
 | `providers` | yes | — | ≥1 provider, **ranked**: tried in order, failover on error. Each is `claude` / `deepseek` / `ollama` (discriminated on `backend`), with `model` and either `api_key_env` (cloud) or `endpoint` (ollama). |
-| `request_timeout_seconds` | no | `20` | >0. |
-| `max_requests_per_minute` | no | `20` | >0. **Reserved — not yet enforced**; nothing throttles on it today. |
+| `request_timeout_seconds` | no | `20` | >0. Per-call LLM timeout (a hung call → failover). |
 
 ## Each `stations[]` entry
 

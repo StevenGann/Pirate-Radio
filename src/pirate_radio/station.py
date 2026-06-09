@@ -154,10 +154,20 @@ class Station:
         # an open stream; __aexit__ tears it down on exit/crash so a restart can't leak it.
         async with self._sink:
             while True:
+                # Discard any day-roll signal left SET from before this slice (the midnight task
+                # fired while this station was crashed/restarting or airing a tail past 00:00). A
+                # stale signal would otherwise be consumed as an instant spurious same-day re-slice;
+                # the NEXT real roll is awaited at the bottom of the loop (CF 0063 / DA). file-then-
+                # event (Q2) still holds — we only ever re-slice after a roll Event.
+                self._day_roll.clear()
                 self._status(StationState.STARTING)
                 logger.info("station %s starting", self.name)  # operator log vocabulary (§H)
                 day = self._clock.now().date()
-                schedule = self._load_or_generate(day)
+                # Hold the per-station regen lock across the daily load so a reslice can't race a
+                # concurrent regenerate write (midnight roll / API regenerate) on the same file —
+                # correctness no longer rides solely on os.replace atomicity (CF 0063 / DA).
+                async with self._regen_lock:
+                    schedule = self._load_or_generate(day)
                 anchored = anchor(
                     schedule, transition_silence=self._config.transition_silence_seconds
                 )
@@ -188,5 +198,4 @@ class Station:
                     skip=self._skip,  # control-API skip-at-next-boundary (P6-3)
                 )
                 self._status(StationState.REGENERATING)  # end of day; awaiting the midnight roll
-                await self._day_roll.wait()  # set by midnight AFTER writing the new day's file
-                self._day_roll.clear()
+                await self._day_roll.wait()  # set by midnight AFTER writing the new day's file (Q2)

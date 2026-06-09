@@ -154,6 +154,113 @@ async def test_run_clears_a_stale_skip_at_each_slice_start(tmp_path, monkeypatch
     assert skip_states[0] is False  # the slice started with the stale skip cleared, not set
 
 
+async def test_run_discards_a_stale_day_roll_before_slicing(tmp_path, monkeypatch) -> None:
+    # CF 0063 / DA: a day-roll signal left SET from before this slice (the midnight task fired while
+    # this station was crashed/restarting or airing a tail past 00:00) must be DISCARDED at slice
+    # start, not consumed as an instant spurious same-day re-slice. The next real roll is awaited.
+    play_count = 0
+    played = asyncio.Event()
+
+    async def _fake_play_day(**kw):
+        nonlocal play_count
+        play_count += 1
+        played.set()
+
+    monkeypatch.setattr("pirate_radio.station.play_day", _fake_play_day)
+    monkeypatch.setattr("pirate_radio.station.load_with_recovery", lambda *a, **k: _schedule())
+
+    day_roll = asyncio.Event()
+    day_roll.set()  # STALE: set before run() even reaches its wait()
+    st = _station(tmp_path, day_roll=day_roll)
+    task = asyncio.create_task(st.run())
+    await asyncio.wait_for(played.wait(), 2.0)  # first slice played
+    await asyncio.sleep(0.05)  # a buggy impl (consume-the-stale-set) would re-slice here
+    assert play_count == 1  # the stale signal did NOT trigger a second slice
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+
+async def test_run_reslices_once_when_the_roll_fires_during_play_day(tmp_path, monkeypatch) -> None:
+    # CF 0063 / focused panel: a day-roll signalled WHILE play_day runs (an item straddling 00:00)
+    # must be observed exactly once -> exactly one re-slice, never lost. The clear-at-top reorder
+    # protects this; a spurious clear before the bottom wait() would drop the in-flight roll and
+    # strand the station on the old day for ~24h (mutation-proven gap).
+    slices = 0
+    second = asyncio.Event()
+    day_roll = asyncio.Event()
+
+    async def _fake_play_day(**kw):
+        nonlocal slices
+        slices += 1
+        if slices == 1:
+            day_roll.set()  # the roll fires DURING the first slice's play_day (the straddle case)
+        else:
+            second.set()
+            await asyncio.Event().wait()  # park the 2nd slice so exactly one re-slice is counted
+
+    monkeypatch.setattr("pirate_radio.station.play_day", _fake_play_day)
+    monkeypatch.setattr("pirate_radio.station.load_with_recovery", lambda *a, **k: _schedule())
+
+    st = _station(tmp_path, day_roll=day_roll)
+    task = asyncio.create_task(st.run())
+    await asyncio.wait_for(second.wait(), 2.0)  # the roll-during-play was observed -> a 2nd slice
+    assert slices == 2  # exactly one re-slice; the in-flight roll was not lost
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+
+async def test_run_releases_the_regen_lock_before_play_day(tmp_path, monkeypatch) -> None:
+    # the regen lock guards only the daily LOAD, not the broadcast — holding it across play_day
+    # would block the midnight roll's prepare_next_day for the whole day. Assert it's free in play.
+    played = asyncio.Event()
+    locked_during_play: list[bool] = []
+
+    async def _fake_play_day(**kw):
+        locked_during_play.append(st.regen_lock.locked())
+        played.set()
+
+    monkeypatch.setattr("pirate_radio.station.play_day", _fake_play_day)
+    monkeypatch.setattr("pirate_radio.station.load_with_recovery", lambda *a, **k: _schedule())
+
+    st = _station(tmp_path)
+    task = asyncio.create_task(st.run())
+    await asyncio.wait_for(played.wait(), 2.0)
+    assert locked_during_play == [False]  # lock released after the load, before airtime
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+
+async def test_run_daily_load_is_serialized_by_the_regen_lock(tmp_path, monkeypatch) -> None:
+    # CF 0063 / DA: the daily reslice load must hold regen_lock so it can't race a concurrent
+    # regenerate write (midnight roll / API regenerate) on the same station's schedule file.
+    loaded: list[int] = []
+
+    def _load(*_a, **_k):
+        loaded.append(1)
+        return _schedule()
+
+    async def _fake_play_day(**kw):
+        await asyncio.sleep(0)
+
+    monkeypatch.setattr("pirate_radio.station.play_day", _fake_play_day)
+    monkeypatch.setattr("pirate_radio.station.load_with_recovery", _load)
+
+    st = _station(tmp_path)
+    await st.regen_lock.acquire()  # a concurrent regenerate is holding the lock
+    task = asyncio.create_task(st.run())
+    await asyncio.sleep(0.05)
+    assert loaded == []  # BLOCKED: run() cannot load while the regen lock is held
+    st.regen_lock.release()
+    await asyncio.sleep(0.05)
+    assert loaded  # loaded only after the lock was free (serialized vs the writer)
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+
 async def test_run_plays_the_day_then_awaits_dayroll(tmp_path, monkeypatch) -> None:
     played = asyncio.Event()
     calls: list = []

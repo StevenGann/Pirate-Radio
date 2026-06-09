@@ -136,12 +136,11 @@ LLMProviderConfig = Annotated[
 class LLMConfig(BaseModel):
     model_config = _FROZEN
     providers: tuple[LLMProviderConfig, ...] = Field(min_length=1)
-    # RESERVED, NOT YET ENFORCED (§7-Q5): a proactive per-process rate limiter is a Phase-4
-    # shared-coordinator concern. v1 handles quotas REACTIVELY via failover; set a provider-side
-    # spend cap for cost control. Read by nothing today — do not rely on it to throttle.
-    max_requests_per_minute: int = Field(default=20, gt=0)
     # H23: per-network-call timeout, threaded by dj/build.py into every LLM backend (uniform
     # across the ranked chain). A hung call -> ProviderUnavailable -> failover -> floor.
+    # (v1 handles provider quotas REACTIVELY via failover; for cost control set a provider-side
+    # spend cap. A proactive per-process rate limiter was considered (§7-Q5) and deliberately NOT
+    # shipped — it was a never-read config knob inviting the false assumption that it throttles.)
     request_timeout_seconds: float = Field(default=20.0, gt=0)
 
 

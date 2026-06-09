@@ -20,6 +20,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from pirate_radio.durability import atomic_replace
 from pirate_radio.errors import TaggingFatal
 from pirate_radio.tagging.models import RecordingMetadata, TagPlan
 
@@ -52,28 +53,14 @@ def _atomic_apply(path: Path, changes: dict[str, str | int], write_tags: WriteTa
         write_tags(tmp, changes)
         with open(tmp, "rb") as handle:
             os.fsync(handle.fileno())  # the tag bytes are on disk before the rename
-        os.replace(tmp, path)  # atomic same-filesystem replace (never a partial original)
+        # atomic same-fs replace + best-effort dir-fsync (the content library may be vfat/exotic
+        # where a dir fd is rejected — harmless, the replace already happened; final-review CF).
+        atomic_replace(tmp, path, strict=False)
     except BaseException:
         # ANY failure/interruption (incl. Ctrl-C between copy and replace) leaves no stray temp and
         # never touches the original — os.replace is the only mutation of `path` and it is atomic.
         tmp.unlink(missing_ok=True)
         raise
-    _fsync_dir(path.parent)  # persist the rename itself (crash-safe on a power loss, RPi)
-
-
-def _fsync_dir(directory: Path) -> None:
-    """Best-effort ``fsync`` of a directory so an ``os.replace`` rename survives a power loss; some
-    filesystems/platforms reject a directory fd — that is harmless, so errors are suppressed."""
-    try:
-        fd = os.open(directory, os.O_RDONLY)
-    except OSError:
-        return
-    try:
-        os.fsync(fd)
-    except OSError:
-        pass
-    finally:
-        os.close(fd)
 
 
 def _open_mutagen(path: Path) -> Any:  # pragma: no cover (R20/R21: real container open needs codec)
