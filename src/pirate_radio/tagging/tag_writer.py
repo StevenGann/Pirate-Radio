@@ -14,13 +14,16 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from pirate_radio.errors import TaggingFatal
-from pirate_radio.tagging.models import TagPlan
+from pirate_radio.tagging.models import RecordingMetadata, TagPlan
+
+_YEAR_RE = re.compile(r"\b(\d{4})\b")
 
 logger = logging.getLogger(__name__)
 
@@ -73,3 +76,25 @@ def _mutagen_write(path: Path, changes: dict[str, str | int]) -> None:
     if "year" in changes:
         audio["date"] = [str(changes["year"])]
     audio.save()
+
+
+def read_existing_tags(path: Path) -> RecordingMetadata:
+    """Read a file's current tags into ``RecordingMetadata`` (for the skip-gate + the merge). An
+    unreadable container is treated as untagged (``RecordingMetadata()``) — never an error here."""
+    audio = _open_mutagen(path)
+    if audio is None:
+        return RecordingMetadata()
+
+    def _first(key: str) -> str | None:
+        value = audio.get(key)
+        return value[0] if value else None
+
+    date = _first("date")
+    year_match = _YEAR_RE.search(date) if date else None
+    year = int(year_match.group(1)) if year_match else None
+    return RecordingMetadata(
+        title=_first("title"),
+        artist=_first("artist"),
+        album=_first("album"),
+        year=year if year is not None and 1 <= year <= 9999 else None,
+    )

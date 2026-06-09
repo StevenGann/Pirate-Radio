@@ -104,3 +104,23 @@ def test_mutagen_write_unreadable_file_is_fatal(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(tag_writer, "_open_mutagen", lambda path: None)  # mutagen can't parse it
     with pytest.raises(TaggingFatal):
         tag_writer._mutagen_write(tmp_path / "x.flac", {"title": "T"})
+
+
+# ---- read_existing_tags (mock; for the skip-gate + merge) ----------------------------------
+def test_read_existing_tags_maps_easy_keys(tmp_path, monkeypatch) -> None:
+    from pirate_radio.tagging import tag_writer
+    from pirate_radio.tagging.models import RecordingMetadata
+
+    fake = {"title": ["T"], "artist": ["A"], "album": ["Al"], "date": ["1984-03"]}
+    monkeypatch.setattr(tag_writer, "_open_mutagen", lambda p: fake)
+    assert tag_writer.read_existing_tags(tmp_path / "x.flac") == RecordingMetadata(
+        title="T", artist="A", album="Al", year=1984
+    )
+
+
+def test_read_existing_tags_unreadable_is_untagged(tmp_path, monkeypatch) -> None:
+    from pirate_radio.tagging import tag_writer
+    from pirate_radio.tagging.models import RecordingMetadata
+
+    monkeypatch.setattr(tag_writer, "_open_mutagen", lambda p: None)
+    assert tag_writer.read_existing_tags(tmp_path / "x.flac") == RecordingMetadata()
