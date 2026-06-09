@@ -23,7 +23,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import date
 from pathlib import Path
 
@@ -103,6 +103,7 @@ class Coordinator:
         decoder_factory: Callable[[], Decoder] | None = None,
         summary_period_seconds: float = _SUMMARY_PERIOD_SECONDS,
         ram_budget_bytes: int = _LOOKAHEAD_RAM_BUDGET_BYTES,
+        offload: Callable[..., Awaitable[object]] = asyncio.to_thread,
     ) -> None:
         self._config = config
         self._clock = clock
@@ -111,6 +112,7 @@ class Coordinator:
         self._sink_factory = sink_factory
         self._on_escalate = on_escalate or _default_on_escalate
         self._summary_period = summary_period_seconds
+        self._offload = offload  # R23: run blocking regenerate off the loop (injectable for tests)
         cache = CatalogCache()
         self._catalog_loader: Callable[[Path], Catalog] = catalog_loader or cache.load
         self._grid_loader = grid_loader
@@ -126,9 +128,24 @@ class Coordinator:
         self.registry: dict[str, StationStatus] = {}
         self.depth: int = 1
         self.stations: list[Station] = self._build_stations(ram_budget_bytes)
+        self._by_name: dict[str, Station] = {s.name: s for s in self.stations}
         # The midnight task rolls every station's schedule at 00:00 (DST-correct, per-station
-        # isolated, file-then-event). It shares the Stations' own day-roll Events (§E/Q2).
+        # isolated, file-then-event). It shares the Stations' own day-roll Events (§E/Q2) and their
+        # per-station regen lock (so an API --regenerate never races the roll, P6-3).
         self._midnight = MidnightTask(stations=self.stations, clock=clock, sleeper=sleeper)
+
+    # ---- control-API actions (P6-3) -------------------------------------------------------
+    def skip(self, name: str) -> None:
+        """Request a skip for ``name`` — the player drops the next item at the boundary (P6-3)."""
+        self._by_name[name].signal_skip()
+
+    async def regenerate_station(self, name: str) -> None:
+        """Force-regenerate ``name``'s on-disk schedule, **lock-serialized** vs the midnight roll +
+        any concurrent regen (P6-3), offloaded off the loop (R23). Effect at next roll/restart."""
+        station = self._by_name[name]
+        async with station.regen_lock:
+            await self._offload(station.prepare_next_day, force=True)
+        logger.info("regenerated %s on request (effective next day-roll/restart)", name)
 
     # ---- build-once -----------------------------------------------------------------------
     def _build_decoder(self) -> Decoder:  # pragma: no cover - the real-decoder boot line (R20-ish)

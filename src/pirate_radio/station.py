@@ -59,6 +59,7 @@ class Station:
         state_dir: Path,
         day_roll: asyncio.Event,
         refill_budget_seconds: float,
+        skip: asyncio.Event | None = None,
         sample_rate: int = DEFAULT_SAMPLE_RATE,
         channels: int = 1,
         maxsize: int = _DEFAULT_MAXSIZE,
@@ -79,6 +80,10 @@ class Station:
         self._grid_loader = grid_loader
         self._state_dir = state_dir
         self._day_roll = day_roll
+        self._skip = skip if skip is not None else asyncio.Event()  # control-API skip (P6-3)
+        # serializes schedule regeneration (midnight roll + an API --regenerate) for THIS station
+        # so two writers never race the same file's .bak rotation (P6-3 / DA).
+        self._regen_lock = asyncio.Lock()
         self._refill_budget = refill_budget_seconds
         self._sample_rate = sample_rate
         self._channels = channels
@@ -101,6 +106,17 @@ class Station:
         written the new day's file). The ``run`` loop, parked on ``day_roll.wait()`` at end of day,
         wakes and re-slices onto the freshly-written schedule."""
         self._day_roll.set()
+
+    def signal_skip(self) -> None:
+        """Request a skip (the control API calls this). The player drops the next item at the next
+        boundary and clears the Event — one-shot; does NOT cut the currently-airing item (P6-3)."""
+        self._skip.set()
+
+    @property
+    def regen_lock(self) -> asyncio.Lock:
+        """Per-station regeneration lock — the midnight roll and an API ``--regenerate`` both take
+        it so they never race the same schedule file's ``.bak`` rotation (P6-3)."""
+        return self._regen_lock
 
     def _status(self, state: StationState, **kw: object) -> None:
         if self._on_status is not None:
@@ -165,6 +181,7 @@ class Station:
                     channels=self._channels,
                     transition_silence=self._config.transition_silence_seconds,
                     maxsize=self._maxsize,
+                    skip=self._skip,  # control-API skip-at-next-boundary (P6-3)
                 )
                 self._status(StationState.REGENERATING)  # end of day; awaiting the midnight roll
                 await self._day_roll.wait()  # set by midnight AFTER writing the new day's file

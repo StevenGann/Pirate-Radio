@@ -60,7 +60,14 @@ def _service(**over) -> ControlService:
     configs = over.pop("configs", {"Pi0": _config("Pi0"), "Pi1": _config("Pi1")})
     loaded = over.pop("load_schedule", lambda name, day: _schedule(day))
     clock = FixedClock(over.pop("clock_at", _NOW))
-    return ControlService(registry=registry, configs=configs, clock=clock, load_schedule=loaded)
+    return ControlService(
+        registry=registry,
+        configs=configs,
+        clock=clock,
+        load_schedule=loaded,
+        skip=over.pop("skip", None),
+        regenerate=over.pop("regenerate", None),
+    )
 
 
 # ---- list_stations -------------------------------------------------------------------------
@@ -161,3 +168,38 @@ def test_schedule_missing_for_date_raises_schedule_not_found() -> None:
     svc = _service(load_schedule=lambda name, day: None)
     with pytest.raises(ScheduleNotFound):
         svc.schedule("Pi0", date(2025, 1, 1))
+
+
+# ---- control paths (P6-3) -----------------------------------------------------------------
+def test_skip_invokes_the_injected_skip() -> None:
+    seen: list[str] = []
+    _service(skip=seen.append).skip("Pi0")
+    assert seen == ["Pi0"]
+
+
+def test_skip_unknown_station_raises_before_invoking() -> None:
+    seen: list[str] = []
+    with pytest.raises(StationNotFound):
+        _service(skip=seen.append).skip("Nope")
+    assert seen == []
+
+
+async def test_regenerate_awaits_the_injected_regenerate() -> None:
+    seen: list[str] = []
+
+    async def _regen(name: str) -> None:
+        seen.append(name)
+
+    await _service(regenerate=_regen).regenerate("Pi0")
+    assert seen == ["Pi0"]
+
+
+async def test_regenerate_unknown_station_raises_before_invoking() -> None:
+    seen: list[str] = []
+
+    async def _regen(name: str) -> None:
+        seen.append(name)
+
+    with pytest.raises(StationNotFound):
+        await _service(regenerate=_regen).regenerate("Nope")
+    assert seen == []

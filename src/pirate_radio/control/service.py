@@ -9,7 +9,7 @@ station with no schedule for a date → ``ScheduleNotFound`` (both → 404 in th
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import date
 
 from pydantic import BaseModel, ConfigDict
@@ -121,11 +121,15 @@ class ControlService:
         configs: Mapping[str, StationConfig],
         clock: Clock,
         load_schedule: LoadSchedule,
+        skip: Callable[[str], None] | None = None,
+        regenerate: Callable[[str], Awaitable[None]] | None = None,
     ) -> None:
         self._registry = registry
         self._configs = configs
         self._clock = clock
         self._load_schedule = load_schedule
+        self._skip = skip
+        self._regenerate = regenerate
 
     def _require(self, name: str) -> StationConfig:
         config = self._configs.get(name)
@@ -171,3 +175,19 @@ class ControlService:
             item_count=len(schedule.items),
             items=[_item_view(i) for i in schedule.items],
         )
+
+    def skip(self, name: str) -> None:
+        """Request a skip for ``name`` (sets the station's skip Event — the player drops the next
+        item at the boundary). Validates the station first (→ 404) so an unknown name never runs."""
+        self._require(name)
+        if self._skip is None:  # pragma: no cover - always wired in prod; guards a misconfig
+            raise RuntimeError("skip action is not wired")
+        self._skip(name)
+
+    async def regenerate(self, name: str) -> None:
+        """Regenerate ``name``'s schedule on disk (lock-serialized vs the midnight roll; effect
+        at the next roll/restart). Validates the station first (→ 404) so an unknown name no-ops."""
+        self._require(name)
+        if self._regenerate is None:  # pragma: no cover - always wired in prod
+            raise RuntimeError("regenerate action is not wired")
+        await self._regenerate(name)

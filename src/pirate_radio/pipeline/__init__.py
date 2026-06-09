@@ -62,6 +62,7 @@ async def run_once(
     channels: int = 1,
     transition_silence: float = 0.0,
     maxsize: int = 2,
+    skip: asyncio.Event | None = None,  # P6-3 control-API skip-at-next-boundary (None -> no skip)
 ) -> None:
     """Render and play ``items`` once, producer and player running concurrently.
 
@@ -91,5 +92,6 @@ async def run_once(
         backstop=backstop,
         refill_budget_seconds=refill_budget_seconds,
         transition_silence=transition_silence,
+        skip=skip,
     )
     await asyncio.gather(producer.run(), player.run(count=len(items)))

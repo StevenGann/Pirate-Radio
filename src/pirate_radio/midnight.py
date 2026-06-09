@@ -23,6 +23,7 @@ silence) — flagged for the P4-9 deep-dive to ratify against the Rev-2 prewarm 
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Sequence
 from datetime import datetime, time, timedelta, tzinfo
@@ -55,9 +56,13 @@ def seconds_until_next_midnight(now: datetime, tz: tzinfo) -> float:
 
 @runtime_checkable
 class DayRollable(Protocol):
-    """What the midnight task needs of a station: a name + the two-step roll (file, then event)."""
+    """What the midnight task needs of a station: a name, the per-station ``regen_lock`` (shared
+    with an API ``--regenerate`` so they never race), and the two-step roll (file, then event)."""
 
     name: str
+
+    @property
+    def regen_lock(self) -> asyncio.Lock: ...
 
     def prepare_next_day(self) -> None: ...
 
@@ -79,7 +84,8 @@ class MidnightTask:
             await self._sleeper.sleep(seconds_until_next_midnight(now, tz))  # DST-correct (H24)
             for station in self._stations:
                 try:
-                    station.prepare_next_day()  # writes the new day's FILE (Q2: file ...)
+                    async with station.regen_lock:  # serialize vs an API --regenerate (P6-3)
+                        station.prepare_next_day()  # writes the new day's FILE (Q2: file ...)
                     station.signal_day_roll()  # ... THEN sets the day-roll Event
                     logger.info("midnight regen %s done", station.name)
                 except Exception as exc:  # noqa: BLE001 - per-station isolation (H-DA-1)

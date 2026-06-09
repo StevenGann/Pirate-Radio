@@ -222,3 +222,34 @@ async def test_run_gathers_the_supervisor_over_all_stations(tmp_path, monkeypatc
 
 async def _noop() -> None:
     return None
+
+
+# ---- control actions (P6-3) ---------------------------------------------------------------
+def test_skip_sets_the_stations_skip_event(tmp_path) -> None:
+    coord = _coord(tmp_path)
+    station = coord.stations[0]
+    assert not station._skip.is_set()
+    coord.skip("Pi0")
+    assert station._skip.is_set()  # the player will drop the next item at the boundary
+
+
+async def test_regenerate_station_offloads_under_the_regen_lock(tmp_path) -> None:
+    # the regen must run through the injected offload (R23) AND hold the station's regen lock so it
+    # can't race the midnight roll (P6-3). Prove the lock gates it: hold it -> regen can't run.
+    import asyncio
+
+    offloaded: list = []
+
+    async def _offload(fn, *a, **kw):
+        offloaded.append(fn)
+        return None  # don't actually generate (no catalog/grid IO in this unit test)
+
+    coord = _coord(tmp_path, offload=_offload)
+    station = coord.stations[0]
+    await station.regen_lock.acquire()  # simulate the midnight roll holding the lock
+    task = asyncio.create_task(coord.regenerate_station("Pi0"))
+    await asyncio.sleep(0.02)
+    assert offloaded == []  # BLOCKED: the regen waits on the lock the "midnight roll" holds
+    station.regen_lock.release()
+    await task
+    assert offloaded  # ran only after the lock was free (serialized vs midnight)

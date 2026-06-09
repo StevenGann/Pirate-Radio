@@ -9,6 +9,7 @@ virtual time — zero wall-clock (R21).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -46,6 +47,29 @@ def _player(buf: LookAheadBuffer, sink: FakeAudioSink, sleeper: VirtualSleeper, 
         refill_budget_seconds=5.0,
         transition_silence=silence,
     )
+
+
+async def test_skip_drops_the_next_segment_then_clears() -> None:
+    # P6-3 skip-at-next-boundary: a set skip Event drops the next buffered segment (advances past
+    # it), then auto-clears (one-shot). The dropped item never airs; the one after does.
+    buf = LookAheadBuffer(maxsize=4)
+    s0, s1 = _seg(10.0), _seg(20.0)
+    await buf.put(s0)
+    await buf.put(s1)
+    sink, sleeper = FakeAudioSink(), VirtualSleeper()
+    skip = asyncio.Event()
+    skip.set()
+    player = Player(
+        buffer=buf,
+        sink=sink,
+        sleeper=sleeper,
+        backstop=_BACKSTOP,
+        refill_budget_seconds=5.0,
+        skip=skip,
+    )
+    await player.run(count=2)
+    assert sink.played == [s1.audio]  # s0 dropped by skip; s1 aired
+    assert not skip.is_set()  # one-shot: cleared after the single drop
 
 
 async def test_plays_segments_in_order_gaplessly() -> None:

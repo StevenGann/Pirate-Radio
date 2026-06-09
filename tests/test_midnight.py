@@ -72,6 +72,9 @@ class _FakeStation:
         self.name = name
         self._fail = fail
         self.events: list[str] = []
+        self.regen_lock = (
+            asyncio.Lock()
+        )  # midnight acquires it (shared with API --regenerate, P6-3)
 
     def prepare_next_day(self) -> None:
         if self._fail:
