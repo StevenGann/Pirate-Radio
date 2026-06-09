@@ -44,6 +44,18 @@ regenerating one.
    (`LOOKAHEAD_RAM_BUDGET_BYTES`, was a `_`-private import); dropped the vestigial `scrub_secrets`
    re-export from the supervisor's `__all__` (callers use `pirate_radio.scrub`).
 
+## Re-poll follow-up (DA CONFIRM + one new finding, fixed)
+
+On re-verification the DA confirmed all prior findings closed (CRITICAL + HIGH genuinely remediated
+with mutation-backed tests) and **VOTED CONFIRM**, but raised one new MEDIUM in the bounded-pool fix:
+the core-sized pool also backs **I/O-bound** LLM/TTS waits (the sync Anthropic SDK + TTS via
+`to_thread`), so on a 1-core Pi (2 workers) two slow-backend patter renders could hold both workers on
+network waits and starve sibling decodes. Fixed immediately: `_offload_pool_size(n_stations)` now
+returns `max(2, cores, n_stations + 2)` — enough for one in-flight offload per station (the
+serial-per-station producer's max concurrency) plus headroom, floored at the core count so CPU work
+still parallelizes; the CPU-bound members stay naturally ≈N (serial producers) while the extra slots
+only ever hold no-core I/O waits. Test updated to `test_offload_pool_size_absorbs_per_station_io_plus_cores`.
+
 ## Carry-forward (non-blocking, recorded)
 
 - **Full assembled-whole stop seam (QA HIGH).** The new integration test exercises supervisor+stations

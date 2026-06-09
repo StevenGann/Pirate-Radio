@@ -82,11 +82,16 @@ def main(argv: list[str], *, deps: MainDeps) -> int:
     return 0
 
 
-def _offload_pool_size() -> int:
-    """Worker count for the offload thread pool — the CPU core count (min 2). One render thread per
-    core matches the serial-per-station producer (≈ N concurrent renders for N stations on N cores);
-    more would just thrash the Pi's cores (arch-cycle RPi)."""
-    return max(2, os.cpu_count() or 4)
+def _offload_pool_size(n_stations: int) -> int:
+    """Worker count for the offload thread pool. The pool backs BOTH CPU-bound work (decode, R128
+    normalize) and I/O-bound waits (the sync LLM SDK + TTS subprocess/network), so sizing to CPU
+    cores alone would let a few slow-backend patter renders — each holding a worker for its full
+    Σ-timeout network wait — starve sibling decodes (arch-cycle DA). Size it to absorb one in-flight
+    offload per station (the serial-per-station producer's max concurrency) plus headroom for the
+    midnight roll / an API read, floored at the core count so CPU work still parallelizes. The
+    CPU-bound members stay naturally ≈N (serial producers); the extra slots only ever hold I/O
+    waits, which consume no core. Per-sink write executors are separate (sink.py)."""
+    return max(2, os.cpu_count() or 4, n_stations + 2)
 
 
 async def _run_daemon(
@@ -99,13 +104,15 @@ async def _run_daemon(
     ``__aexit__`` and the audio device is closed cleanly, instead of Python's default
     hard-terminate-on-SIGTERM that abandons the open PortAudio stream (final-review DA HIGH)."""
     loop = asyncio.get_running_loop()
-    # Bound the offload thread pool that backs every `asyncio.to_thread` (decode, loudness, TTS,
-    # the daily/midnight schedule writes). The stdlib default is min(32, cpu+4) — far more than a
-    # 4-core Pi has — so the architecture would lean on an emergent "≤cores concurrent renders"
-    # bound it never enforces; size it explicitly to the core count (arch-cycle RPi/DA). The
-    # per-sink write executors are separate (sink.py), so playback is never starved by this pool.
+    # Bound the offload thread pool that backs every `asyncio.to_thread` (decode, loudness, the sync
+    # LLM/TTS calls, the daily/midnight schedule writes). The stdlib default is min(32, cpu+4) — an
+    # unbounded-feeling default the architecture would lean on without enforcing — and a pure
+    # core-count would starve sibling decodes when slow backends hold workers on network waits
+    # (arch-cycle DA); _offload_pool_size sizes for one in-flight offload per station + headroom.
+    # The per-sink write executors are separate (sink.py), so playback is never starved here.
     offload_pool = ThreadPoolExecutor(
-        max_workers=_offload_pool_size(), thread_name_prefix="pirate-offload"
+        max_workers=_offload_pool_size(len(coordinator.stations)),
+        thread_name_prefix="pirate-offload",
     )
     loop.set_default_executor(offload_pool)
 

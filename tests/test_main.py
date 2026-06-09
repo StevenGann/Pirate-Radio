@@ -131,6 +131,8 @@ async def test_run_daemon_api_crash_does_not_stop_the_broadcast() -> None:
     ran: list[str] = []
 
     class _Coord:
+        stations: list = []  # _run_daemon sizes the offload pool from len(coordinator.stations)
+
         async def run(self) -> None:
             ran.append("started")
             await asyncio.sleep(0.01)
@@ -143,15 +145,18 @@ async def test_run_daemon_api_crash_does_not_stop_the_broadcast() -> None:
     assert ran == ["started", "finished"]  # the broadcast ran to completion despite the API crash
 
 
-def test_offload_pool_size_is_core_bounded() -> None:
-    # arch-cycle RPi/DA: the offload pool is sized to the core count (min 2), NOT the stdlib
-    # min(32, cpu+4) default, so N stations' renders can't thrash a 4-core Pi.
+def test_offload_pool_size_absorbs_per_station_io_plus_cores() -> None:
+    # arch-cycle DA: the pool backs CPU work AND I/O-bound LLM/TTS waits, so it's sized to absorb
+    # one in-flight offload per station (+headroom) floored at the core count — not a pure
+    # core-count (which would starve sibling decodes behind slow-backend network waits).
     import os
 
     from pirate_radio.__main__ import _offload_pool_size
 
-    assert _offload_pool_size() == max(2, os.cpu_count() or 4)
-    assert _offload_pool_size() >= 2
+    cores = os.cpu_count() or 4
+    assert _offload_pool_size(4) == max(2, cores, 4 + 2)  # 4 stations -> >= 6 (room for I/O waits)
+    assert _offload_pool_size(1) == max(2, cores, 1 + 2)
+    assert _offload_pool_size(0) >= 2  # floor
 
 
 async def test_run_daemon_drains_the_broadcast_on_shutdown() -> None:
@@ -167,6 +172,8 @@ async def test_run_daemon_drains_the_broadcast_on_shutdown() -> None:
     drained: list[str] = []
 
     class _Coord:
+        stations: list = []  # _run_daemon sizes the offload pool from len(coordinator.stations)
+
         async def run(self) -> None:
             try:
                 await asyncio.Event().wait()  # run forever until cancelled
